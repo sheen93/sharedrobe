@@ -1,69 +1,97 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState, useEffect } from "react";
+import { Bell, User, Plus, Loader2 } from "lucide-react";
+import BottomNav from "@/components/BottomNav";
+import AddItemModal from "@/components/AddItemModal";
+import { createClient } from "@/utils/supabase/client";
+
+const CATEGORIES = ["All", "Tops", "Bottoms", "Dresses", "Outerwear", "Shoes", "Bags", "Accessories"];
+
+interface WardrobeItem {
+  id: string; title: string; category: string; tags: string[]; image_url: string;
+}
+
+export default function ClosetFeed() {
+  const [activeCategory, setActiveCategory] = useState("All");
+  const [items, setItems] = useState<WardrobeItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const supabase = createClient();
+
+  const fetchItems = async () => {
+    setIsLoading(true);
+    const { data, error } = await supabase.from("items").select("*").order("created_at", { ascending: false });
+    if (!error) setItems(data || []);
+    setIsLoading(false);
+  };
+
+  useEffect(() => { fetchItems(); }, []);
+
+  const handleItemAdded = () => { setIsModalOpen(false); fetchItems(); };
+
+  const filteredItems = activeCategory === "All" ? items : items.filter(i => i.category === activeCategory);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <>
+      <div className="max-w-md mx-auto min-h-screen bg-cream">
+        <header className="px-5 pt-12 pb-4 flex justify-between items-center sticky top-0 bg-cream/90 backdrop-blur-md z-30">
+          <div>
+            <h1 className="text-2xl font-bold text-charcoal tracking-tight">My Closet</h1>
+            <p className="text-sm text-taupe font-medium">Hello, Hridia! 👋</p>
+          </div>
+          <div className="flex items-center gap-3 text-charcoal">
+            <button className="p-2 bg-beige rounded-full hover:bg-sage-light/30 transition"><Bell size={20} /></button>
+            <button className="p-2 bg-beige rounded-full hover:bg-sage-light/30 transition"><User size={20} /></button>
+          </div>
+        </header>
+
+        <div className="px-5 py-3 overflow-x-auto hide-scrollbar">
+          <div className="flex gap-2 min-w-max">
+            {CATEGORIES.map(cat => (
+              <button key={cat} onClick={() => setActiveCategory(cat)} className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-all ${activeCategory === cat ? "bg-sage text-white shadow-md" : "bg-beige text-taupe"}`}>
+                {cat}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="px-5 py-2">
+          <button onClick={() => setIsModalOpen(true)} className="w-full py-3.5 border-2 border-sage text-sage font-bold rounded-2xl flex items-center justify-center gap-2 hover:bg-sage hover:text-white transition-all shadow-sm">
+            <Plus size={20} /> Add New Item
+          </button>
         </div>
-      </main>
-    </div>
+
+        <div className="p-5">
+          {isLoading ? (
+            <div className="py-12 flex justify-center text-sage"><Loader2 className="animate-spin" size={32} /></div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              {filteredItems.map(item => (
+                <div key={item.id} className="bg-beige rounded-2xl overflow-hidden flex flex-col shadow-sm border border-beige hover:shadow-md transition-shadow">
+                  <div className="aspect-[4/5] bg-cream w-full relative">
+                    <img src={item.image_url} alt={item.title} className="w-full h-full object-cover" />
+                  </div>
+                  <div className="p-3">
+                    <h3 className="text-sm font-bold text-charcoal truncate">{item.title}</h3>
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {item.tags?.map(tag => <span key={tag} className="text-[10px] px-2 py-0.5 bg-cream text-taupe rounded-md font-medium border border-sage-light/30">#{tag}</span>)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {filteredItems.length === 0 && (
+                <div className="col-span-2 py-12 flex flex-col items-center text-taupe text-center">
+                  <div className="w-16 h-16 bg-beige rounded-full flex items-center justify-center mb-3"><Plus size={24} className="text-sage" /></div>
+                  <p className="font-medium text-charcoal">Your closet is empty</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      <BottomNav />
+      <AddItemModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSuccess={handleItemAdded} />
+    </>
   );
 }
