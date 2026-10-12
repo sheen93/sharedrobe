@@ -9,7 +9,16 @@ import ScreenHeader from "@/components/ui/ScreenHeader";
 import InfoBar from "@/components/ui/InfoBar";
 import { createClient } from "@/utils/supabase/client";
 
-const CATEGORIES = ["All", "Top", "Bottom", "Dress", "Accessories", "Fav Outfit"] as const;
+const CATEGORIES = [
+  "All",
+  "Tops",
+  "Bottoms",
+  "Dresses",
+  "Outerwear",
+  "Shoes",
+  "Bags",
+  "Accessories",
+] as const;
 
 interface WardrobeItem {
   id: string;
@@ -103,7 +112,15 @@ export default function MyDrobePage() {
   const filteredItems =
     activeCategory === "All"
       ? items
-      : items.filter((i) => i.category.toLowerCase() === activeCategory.toLowerCase());
+      : items.filter((i) => {
+          if (!i.category) return false;
+          const itemCat = i.category.toLowerCase().trim();
+          const activeCat = activeCategory.toLowerCase().trim();
+          return (
+            itemCat === activeCat ||
+            itemCat.replace(/s$/, "") === activeCat.replace(/s$/, "")
+          );
+        });
 
   return (
     <div className="flex min-h-dvh flex-col items-center bg-linen p-4 pb-24 sm:p-6">

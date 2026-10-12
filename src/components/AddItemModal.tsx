@@ -8,6 +8,8 @@ import imageCompression from "browser-image-compression";
 import { createClient } from "@/utils/supabase/client";
 import {
   type FormError,
+  type ValidEnumCategory,
+  VALID_ENUM_CATEGORIES,
   validateUploadInputs,
   resolveSessionError,
   resolveStorageError,
@@ -20,7 +22,20 @@ interface AddItemModalProps {
   onSuccess: () => void;
 }
 
-const CATEGORIES = ["Top", "Bottom", "Dress", "Accessories", "Fav Outfit"] as const;
+/**
+ * Category options adhering strictly to the PostgreSQL enum `item_category` values:
+ * Tops, Bottoms, Dresses, Outerwear, Shoes, Bags, Accessories.
+ * UI labels provide rich contextual hints while `value` guarantees database enum integrity.
+ */
+const CATEGORY_OPTIONS: { value: ValidEnumCategory; label: string; hint: string }[] = [
+  { value: "Tops", label: "Tops", hint: "Shirts, blouses, knitwear, tees" },
+  { value: "Bottoms", label: "Bottoms", hint: "Jeans, trousers, skirts, shorts" },
+  { value: "Dresses", label: "Dresses", hint: "Midi, maxi, cocktail, jumpsuits" },
+  { value: "Outerwear", label: "Outerwear", hint: "Coats, jackets, blazers, vests" },
+  { value: "Shoes", label: "Shoes", hint: "Boots, sneakers, heels, flats" },
+  { value: "Bags", label: "Bags", hint: "Totes, shoulder bags, clutches" },
+  { value: "Accessories", label: "Accessories", hint: "Jewelry, scarves, belts, hats" },
+];
 
 type UploadStep = "idle" | "compressing" | "uploading_storage" | "saving_db";
 
@@ -28,7 +43,7 @@ export default function AddItemModal({ isOpen, onClose, onSuccess }: AddItemModa
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState<string>(CATEGORIES[0]);
+  const [category, setCategory] = useState<ValidEnumCategory>(VALID_ENUM_CATEGORIES[0]);
   const [tagInput, setTagInput] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [uploadStep, setUploadStep] = useState<UploadStep>("idle");
@@ -77,7 +92,7 @@ export default function AddItemModal({ isOpen, onClose, onSuccess }: AddItemModa
     setFile(null);
     setPreview(null);
     setTitle("");
-    setCategory(CATEGORIES[0]);
+    setCategory(VALID_ENUM_CATEGORIES[0]);
     setTags([]);
     setTagInput("");
     setFormError(null);
@@ -94,8 +109,8 @@ export default function AddItemModal({ isOpen, onClose, onSuccess }: AddItemModa
     e.preventDefault();
     setFormError(null);
 
-    // Scenario 1: User attempts to upload without selecting a file or title
-    const inputError = validateUploadInputs(file, title);
+    // Scenario 1: User attempts to upload without selecting a file, title, or valid category
+    const inputError = validateUploadInputs(file, title, category);
     if (inputError) {
       setFormError(inputError);
       return;
@@ -122,7 +137,7 @@ export default function AddItemModal({ isOpen, onClose, onSuccess }: AddItemModa
       const fileName = `${uniqueSuffix}.${fileExt}`;
       const filePath = `${userId}/${fileName}`;
 
-      // Scenario 3: Storage bucket upload and rejection handling
+      // Scenario 3: Storage bucket upload and rejection handling (404 missing, 403 denied, payload too large, network)
       const { error: uploadError } = await supabase.storage
         .from("wardrobe")
         .upload(filePath, file as File, {
@@ -142,11 +157,11 @@ export default function AddItemModal({ isOpen, onClose, onSuccess }: AddItemModa
         data: { publicUrl },
       } = supabase.storage.from("wardrobe").getPublicUrl(filePath);
 
-      // Scenario 4: Database insert with explicit owner_id and RLS handling
+      // Scenario 4: Database insert with explicit plural category ENUM, owner_id, and RLS handling
       setUploadStep("saving_db");
       const { error: dbError } = await supabase.from("items").insert({
         title: title.trim(),
-        category,
+        category, // Strictly matches Postgres enum `item_category`
         tags,
         image_url: publicUrl,
         owner_id: userId,
@@ -277,19 +292,27 @@ export default function AddItemModal({ isOpen, onClose, onSuccess }: AddItemModa
             />
           </div>
 
-          {/* Category */}
+          {/* Category Dropdown (strictly bound to Postgres ENUM values) */}
           <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-french-navy">
-              Category Folder
+            <label
+              htmlFor="category-select"
+              className="text-[11px] font-bold uppercase tracking-wider text-french-navy"
+            >
+              Category Folder <span className="text-dusty-lilac">*</span>
             </label>
             <select
+              id="category-select"
               value={category}
-              onChange={(e) => setCategory(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value as ValidEnumCategory;
+                setCategory(val);
+                if (formError?.type === "enum_violation") setFormError(null);
+              }}
               className="mt-1 w-full rounded-xl border border-border-strong bg-chalk px-4 py-2.5 text-sm font-semibold text-midnight-slate focus:border-french-navy focus:outline-none"
             >
-              {CATEGORIES.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
+              {CATEGORY_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label} — {opt.hint}
                 </option>
               ))}
             </select>
