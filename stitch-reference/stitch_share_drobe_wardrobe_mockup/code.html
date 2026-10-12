@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Share Drobe MVP v1 — Minimal Database Edition</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: #F4F2EB;
+      color: #121926;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: #D9D6CC;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body class="p-6 md:p-10 flex flex-col items-center min-h-screen">
+
+  <!-- Overview Header / Palette Metadata -->
+  <header class="w-full max-w-6xl text-center mb-10">
+    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#E5E2D6] text-xs font-semibold uppercase tracking-wider text-[#1D2A44] mb-3">
+      <span class="w-2 h-2 rounded-full bg-[#9683B8]"></span>
+      MVP v1 Database Layout
+    </div>
+    <h1 class="text-3xl md:text-4xl font-extrabold text-[#121926] tracking-tight">Share Drobe — MVP v1 (Database Architecture)</h1>
+    <p class="text-[#475467] text-sm md:text-base max-w-2xl mx-auto mt-2">
+      Lightweight, directory-first mobile flow structured like an organized personal wardrobe database. Clean folder views, rapid capture triggers, and simplified account metadata.
+    </p>
+
+    <!-- Color Palette Chips -->
+    <div class="flex flex-wrap items-center justify-center gap-2.5 mt-5 text-xs font-medium text-[#121926]">
+      <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#FCFBF7] border border-[#E5E2D6] shadow-sm">
+        <span class="w-3.5 h-3.5 rounded-full border border-black/10" style="background-color: #FCFBF7;"></span>
+        <span>Buttercream (#FCFBF7)</span>
+      </div>
+      <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F0EFE9] border border-[#E5E2D6] shadow-sm">
+        <span class="w-3.5 h-3.5 rounded-full border border-black/10" style="background-color: #F0EFE9;"></span>
+        <span>Chalk (#F0EFE9)</span>
+      </div>
+      <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#E5E2D6] shadow-sm">
+        <span class="w-3.5 h-3.5 rounded-full" style="background-color: #1D2A44;"></span>
+        <span>French Navy (#1D2A44)</span>
+      </div>
+      <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#E5E2D6] shadow-sm">
+        <span class="w-3.5 h-3.5 rounded-full" style="background-color: #9683B8;"></span>
+        <span>Dusty Lilac (#9683B8)</span>
+      </div>
+      <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#E5E2D6] shadow-sm">
+        <span class="w-3.5 h-3.5 rounded-full" style="background-color: #121926;"></span>
+        <span>Midnight Slate (#121926)</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- 3 Screens Side-by-Side Flex Layout -->
+  <main class="w-full max-w-7xl flex flex-col xl:flex-row items-center justify-center gap-8 lg:gap-10">
+
+    <!-- ========================================== -->
+    <!-- SCREEN 1: MyDrobe (Folder Database) -->
+    <!-- ========================================== -->
+    <div class="flex flex-col items-center">
+      <div class="text-xs font-bold uppercase tracking-wider text-[#64748B] mb-2 flex items-center gap-1.5">
+        <span class="px-2 py-0.5 rounded bg-[#1D2A44] text-white text-[10px]">SCREEN 1</span>
+        <span>Personal Closet Database</span>
+      </div>
+
+      <!-- Mobile Shell -->
+      <div class="w-[380px] h-[780px] bg-[#FCFBF7] rounded-[42px] p-4 shadow-2xl border-[8px] border-[#1D2A44] flex flex-col relative overflow-hidden">
+        
+        <!-- Status Bar -->
+        <div class="flex items-center justify-between px-3 pt-1 pb-2 text-[12px] font-semibold text-[#121926]">
+          <span>9:41</span>
+          <div class="w-20 h-4 bg-[#1D2A44] rounded-full mx-auto"></div>
+          <div class="flex items-center gap-1.5">
+            <i data-lucide="signal" class="w-3 h-3 text-[#121926]"></i>
+            <i data-lucide="wifi" class="w-3 h-3 text-[#121926]"></i>
+            <i data-lucide="battery" class="w-3.5 h-3.5 text-[#121926]"></i>
+          </div>
+        </div>
+
+        <!-- App Header -->
+        <div class="flex items-center justify-between px-2 pt-2 pb-4 border-b border-[#E5E2D6]">
+          <div>
+            <div class="text-[10px] font-mono uppercase tracking-wider text-[#9683B8] font-bold">DIRECTORY // MY_DROBE</div>
+            <h2 class="text-2xl font-bold text-[#1D2A44] tracking-tight">MyDrobe</h2>
+          </div>
+          <!-- Plus button to add clothes -->
+          <button class="w-10 h-10 rounded-xl bg-[#1D2A44] hover:bg-[#28395B] text-white flex items-center justify-center shadow-md active:scale-95 transition" title="Add clothing picture to database">
+            <i data-lucide="plus" class="w-5 h-5 stroke-[2.5]"></i>
+          </button>
+        </div>
+
+        <!-- Database stats badge -->
+        <div class="mt-3 px-3 py-2 rounded-xl bg-[#F0EFE9] border border-[#E5E2D6] flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <i data-lucide="database" class="w-4 h-4 text-[#9683B8]"></i>
+            <span class="text-xs font-medium text-[#121926]">5 Categorized Folders</span>
+          </div>
+          <span class="text-[11px] font-mono text-[#64748B]">38 Items Total</span>
+        </div>
+
+        <!-- 5 Folders Directory List -->
+        <div class="flex-1 overflow-y-auto custom-scroll mt-3.5 space-y-2.5 pr-1 pb-16">
+
+          <!-- Folder 1: Top -->
+          <div class="group p-3.5 rounded-2xl bg-[#F0EFE9] border border-[#E5E2D6] hover:border-[#9683B8] cursor-pointer transition shadow-sm hover:shadow">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-xl bg-[#FCFBF7] border border-[#D9D6CC] flex items-center justify-center text-[#1D2A44] group-hover:bg-[#9683B8] group-hover:text-white transition">
+                  <i data-lucide="folder" class="w-5 h-5 fill-current/20"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-sm text-[#121926]">Top</h3>
+                  <p class="text-[11px] text-[#64748B]">Shirts, blouses, knitwear, tees</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-md bg-[#FCFBF7] text-[11px] font-mono font-medium text-[#1D2A44] border border-[#E5E2D6]">12 items</span>
+                <i data-lucide="chevron-right" class="w-4 h-4 text-[#64748B] group-hover:translate-x-0.5 transition"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- Folder 2: Bottom -->
+          <div class="group p-3.5 rounded-2xl bg-[#F0EFE9] border border-[#E5E2D6] hover:border-[#9683B8] cursor-pointer transition shadow-sm hover:shadow">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-xl bg-[#FCFBF7] border border-[#D9D6CC] flex items-center justify-center text-[#1D2A44] group-hover:bg-[#9683B8] group-hover:text-white transition">
+                  <i data-lucide="folder" class="w-5 h-5 fill-current/20"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-sm text-[#121926]">Bottom</h3>
+                  <p class="text-[11px] text-[#64748B]">Jeans, trousers, skirts, shorts</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-md bg-[#FCFBF7] text-[11px] font-mono font-medium text-[#1D2A44] border border-[#E5E2D6]">8 items</span>
+                <i data-lucide="chevron-right" class="w-4 h-4 text-[#64748B] group-hover:translate-x-0.5 transition"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- Folder 3: Dress -->
+          <div class="group p-3.5 rounded-2xl bg-[#F0EFE9] border border-[#E5E2D6] hover:border-[#9683B8] cursor-pointer transition shadow-sm hover:shadow">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-xl bg-[#FCFBF7] border border-[#D9D6CC] flex items-center justify-center text-[#1D2A44] group-hover:bg-[#9683B8] group-hover:text-white transition">
+                  <i data-lucide="folder" class="w-5 h-5 fill-current/20"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-sm text-[#121926]">Dress</h3>
+                  <p class="text-[11px] text-[#64748B]">Midi, maxi, cocktail, jumpsuits</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-md bg-[#FCFBF7] text-[11px] font-mono font-medium text-[#1D2A44] border border-[#E5E2D6]">6 items</span>
+                <i data-lucide="chevron-right" class="w-4 h-4 text-[#64748B] group-hover:translate-x-0.5 transition"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- Folder 4: Accessories -->
+          <div class="group p-3.5 rounded-2xl bg-[#F0EFE9] border border-[#E5E2D6] hover:border-[#9683B8] cursor-pointer transition shadow-sm hover:shadow">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-xl bg-[#FCFBF7] border border-[#D9D6CC] flex items-center justify-center text-[#1D2A44] group-hover:bg-[#9683B8] group-hover:text-white transition">
+                  <i data-lucide="folder" class="w-5 h-5 fill-current/20"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-sm text-[#121926]">Accessories</h3>
+                  <p class="text-[11px] text-[#64748B]">Bags, scarves, belts, jewelry</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-md bg-[#FCFBF7] text-[11px] font-mono font-medium text-[#1D2A44] border border-[#E5E2D6]">9 items</span>
+                <i data-lucide="chevron-right" class="w-4 h-4 text-[#64748B] group-hover:translate-x-0.5 transition"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- Folder 5: Fav Outfit -->
+          <div class="group p-3.5 rounded-2xl bg-[#F0EFE9] border-2 border-[#9683B8]/60 hover:border-[#9683B8] cursor-pointer transition shadow-sm hover:shadow relative overflow-hidden">
+            <div class="absolute -top-6 -right-6 w-14 h-14 bg-[#9683B8]/15 rounded-full pointer-events-none"></div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-xl bg-[#9683B8] text-white flex items-center justify-center shadow-sm">
+                  <i data-lucide="folder-heart" class="w-5 h-5 fill-current/30"></i>
+                </div>
+                <div>
+                  <div class="flex items-center gap-1.5">
+                    <h3 class="font-bold text-sm text-[#121926]">Fav Outfit</h3>
+                    <span class="w-1.5 h-1.5 rounded-full bg-[#9683B8]"></span>
+                  </div>
+                  <p class="text-[11px] text-[#64748B]">Saved combinations & looks</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-md bg-white text-[11px] font-mono font-bold text-[#9683B8] border border-[#9683B8]/30">3 curated</span>
+                <i data-lucide="chevron-right" class="w-4 h-4 text-[#64748B] group-hover:translate-x-0.5 transition"></i>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Fixed Bottom Navigation (MyDrobe Active) -->
+        <div class="absolute bottom-3 left-4 right-4 bg-[#1D2A44] rounded-2xl px-6 py-2.5 flex items-center justify-between text-white shadow-xl z-20">
+          <!-- Nav 1: MyDrobe (Active) -->
+          <button class="flex flex-col items-center gap-0.5 text-[#9683B8] relative">
+            <div class="w-9 h-6 rounded-lg bg-white/10 flex items-center justify-center">
+              <i data-lucide="shirt" class="w-4 h-4 stroke-[2.5]"></i>
+            </div>
+            <span class="text-[10px] font-bold tracking-tight">MyDrobe</span>
+          </button>
+
+          <!-- Nav 2: ShareDrobe -->
+          <button class="flex flex-col items-center gap-0.5 text-[#E5E2D6]/70 hover:text-white transition">
+            <div class="w-9 h-6 flex items-center justify-center">
+              <i data-lucide="users" class="w-4 h-4 stroke-[2]"></i>
+            </div>
+            <span class="text-[10px] font-medium tracking-tight">ShareDrobe</span>
+          </button>
+
+          <!-- Nav 3: Profile -->
+          <button class="flex flex-col items-center gap-0.5 text-[#E5E2D6]/70 hover:text-white transition">
+            <div class="w-9 h-6 flex items-center justify-center">
+              <i data-lucide="user" class="w-4 h-4 stroke-[2]"></i>
+            </div>
+            <span class="text-[10px] font-medium tracking-tight">Profile</span>
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- SCREEN 2: ShareDrobe (Community Groups) -->
+    <!-- ========================================== -->
+    <div class="flex flex-col items-center">
+      <div class="text-xs font-bold uppercase tracking-wider text-[#64748B] mb-2 flex items-center gap-1.5">
+        <span class="px-2 py-0.5 rounded bg-[#9683B8] text-white text-[10px]">SCREEN 2</span>
+        <span>Community Drobe Hub + Trigger</span>
+      </div>
+
+      <!-- Mobile Shell -->
+      <div class="w-[380px] h-[780px] bg-[#FCFBF7] rounded-[42px] p-4 shadow-2xl border-[8px] border-[#1D2A44] flex flex-col relative overflow-hidden">
+        
+        <!-- Status Bar -->
+        <div class="flex items-center justify-between px-3 pt-1 pb-2 text-[12px] font-semibold text-[#121926]">
+          <span>9:41</span>
+          <div class="w-20 h-4 bg-[#1D2A44] rounded-full mx-auto"></div>
+          <div class="flex items-center gap-1.5">
+            <i data-lucide="signal" class="w-3 h-3 text-[#121926]"></i>
+            <i data-lucide="wifi" class="w-3 h-3 text-[#121926]"></i>
+            <i data-lucide="battery" class="w-3.5 h-3.5 text-[#121926]"></i>
+          </div>
+        </div>
+
+        <!-- App Header with prompt popup open state simulation -->
+        <div class="flex items-center justify-between px-2 pt-2 pb-4 border-b border-[#E5E2D6] relative">
+          <div>
+            <div class="text-[10px] font-mono uppercase tracking-wider text-[#9683B8] font-bold">CIRCULATION // SHARED</div>
+            <h2 class="text-2xl font-bold text-[#1D2A44] tracking-tight">ShareDrobe</h2>
+          </div>
+
+          <!-- Upper Right '+' Button -->
+          <div class="relative">
+            <button class="w-10 h-10 rounded-xl bg-[#9683B8] text-white flex items-center justify-center shadow-md active:scale-95 transition" title="Add Options">
+              <i data-lucide="plus" class="w-5 h-5 stroke-[2.5]"></i>
+            </button>
+
+            <!-- Prompt Popover (Add Friend, Add Group) -->
+            <div class="absolute right-0 top-12 w-48 bg-[#1D2A44] text-white rounded-2xl p-2 shadow-2xl z-30 border border-white/10 animate-fade-in">
+              <div class="text-[9px] uppercase tracking-wider font-mono text-[#9683B8] px-2.5 py-1 font-bold">Quick Actions</div>
+              
+              <!-- Option 1: Add Friend -->
+              <div class="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/10 cursor-pointer transition">
+                <div class="w-7 h-7 rounded-lg bg-[#9683B8]/30 flex items-center justify-center text-[#9683B8]">
+                  <i data-lucide="user-plus" class="w-4 h-4"></i>
+                </div>
+                <div class="text-xs font-semibold">Add Friend</div>
+              </div>
+
+              <!-- Option 2: Add Group -->
+              <div class="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/10 cursor-pointer transition">
+                <div class="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center text-white">
+                  <i data-lucide="users" class="w-4 h-4"></i>
+                </div>
+                <div class="text-xs font-semibold">Add Group</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Helper badge -->
+        <div class="mt-3 px-3 py-2 rounded-xl bg-[#F0EFE9] border border-[#E5E2D6] flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <i data-lucide="share-2" class="w-4 h-4 text-[#1D2A44]"></i>
+            <span class="text-xs font-medium text-[#121926]">Connected Sharing Circles</span>
+          </div>
+          <span class="text-[11px] font-mono text-[#64748B]">4 Groups</span>
+        </div>
+
+        <!-- Main Body: Community Named Folder List -->
+        <div class="flex-1 overflow-y-auto custom-scroll mt-3.5 space-y-2.5 pr-1 pb-16">
+
+          <!-- Community Folder 1 -->
+          <div class="group p-3.5 rounded-2xl bg-[#F0EFE9] border border-[#E5E2D6] hover:border-[#9683B8] cursor-pointer transition shadow-sm hover:shadow">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-xl bg-[#FCFBF7] border border-[#D9D6CC] flex items-center justify-center text-[#1D2A44] group-hover:bg-[#1D2A44] group-hover:text-white transition">
+                  <i data-lucide="folder-archive" class="w-5 h-5 fill-current/20"></i>
+                </div>
+                <div>
+                  <div class="flex items-center gap-1.5">
+                    <h3 class="font-bold text-sm text-[#121926]">College Roommates</h3>
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Active"></span>
+                  </div>
+                  <p class="text-[11px] text-[#64748B]">4 Members • Maya, Emma, Zoe & You</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-md bg-[#FCFBF7] text-[11px] font-mono font-medium text-[#1D2A44] border border-[#E5E2D6]">24 items</span>
+                <i data-lucide="chevron-right" class="w-4 h-4 text-[#64748B] group-hover:translate-x-0.5 transition"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- Community Folder 2 -->
+          <div class="group p-3.5 rounded-2xl bg-[#F0EFE9] border border-[#E5E2D6] hover:border-[#9683B8] cursor-pointer transition shadow-sm hover:shadow">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-xl bg-[#FCFBF7] border border-[#D9D6CC] flex items-center justify-center text-[#1D2A44] group-hover:bg-[#1D2A44] group-hover:text-white transition">
+                  <i data-lucide="folder-archive" class="w-5 h-5 fill-current/20"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-sm text-[#121926]">Weekend Gala Circle</h3>
+                  <p class="text-[11px] text-[#64748B]">6 Members • Formal dresses & coats</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-md bg-[#FCFBF7] text-[11px] font-mono font-medium text-[#1D2A44] border border-[#E5E2D6]">18 items</span>
+                <i data-lucide="chevron-right" class="w-4 h-4 text-[#64748B] group-hover:translate-x-0.5 transition"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- Community Folder 3 -->
+          <div class="group p-3.5 rounded-2xl bg-[#F0EFE9] border border-[#E5E2D6] hover:border-[#9683B8] cursor-pointer transition shadow-sm hover:shadow">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-xl bg-[#FCFBF7] border border-[#D9D6CC] flex items-center justify-center text-[#1D2A44] group-hover:bg-[#1D2A44] group-hover:text-white transition">
+                  <i data-lucide="folder-archive" class="w-5 h-5 fill-current/20"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-sm text-[#121926]">Brooklyn Fashion Swap</h3>
+                  <p class="text-[11px] text-[#64748B]">12 Members • Local neighborhood</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-md bg-[#FCFBF7] text-[11px] font-mono font-medium text-[#1D2A44] border border-[#E5E2D6]">41 items</span>
+                <i data-lucide="chevron-right" class="w-4 h-4 text-[#64748B] group-hover:translate-x-0.5 transition"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- Community Folder 4 -->
+          <div class="group p-3.5 rounded-2xl bg-[#F0EFE9] border border-[#E5E2D6] hover:border-[#9683B8] cursor-pointer transition shadow-sm hover:shadow">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-xl bg-[#FCFBF7] border border-[#D9D6CC] flex items-center justify-center text-[#1D2A44] group-hover:bg-[#1D2A44] group-hover:text-white transition">
+                  <i data-lucide="folder-archive" class="w-5 h-5 fill-current/20"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-sm text-[#121926]">Work Besties Collective</h3>
+                  <p class="text-[11px] text-[#64748B]">3 Members • Office wear & blazers</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-md bg-[#FCFBF7] text-[11px] font-mono font-medium text-[#1D2A44] border border-[#E5E2D6]">15 items</span>
+                <i data-lucide="chevron-right" class="w-4 h-4 text-[#64748B] group-hover:translate-x-0.5 transition"></i>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Fixed Bottom Navigation (ShareDrobe Active) -->
+        <div class="absolute bottom-3 left-4 right-4 bg-[#1D2A44] rounded-2xl px-6 py-2.5 flex items-center justify-between text-white shadow-xl z-20">
+          <!-- Nav 1: MyDrobe -->
+          <button class="flex flex-col items-center gap-0.5 text-[#E5E2D6]/70 hover:text-white transition">
+            <div class="w-9 h-6 flex items-center justify-center">
+              <i data-lucide="shirt" class="w-4 h-4 stroke-[2]"></i>
+            </div>
+            <span class="text-[10px] font-medium tracking-tight">MyDrobe</span>
+          </button>
+
+          <!-- Nav 2: ShareDrobe (Active) -->
+          <button class="flex flex-col items-center gap-0.5 text-[#9683B8] relative">
+            <div class="w-9 h-6 rounded-lg bg-white/10 flex items-center justify-center">
+              <i data-lucide="users" class="w-4 h-4 stroke-[2.5]"></i>
+            </div>
+            <span class="text-[10px] font-bold tracking-tight">ShareDrobe</span>
+          </button>
+
+          <!-- Nav 3: Profile -->
+          <button class="flex flex-col items-center gap-0.5 text-[#E5E2D6]/70 hover:text-white transition">
+            <div class="w-9 h-6 flex items-center justify-center">
+              <i data-lucide="user" class="w-4 h-4 stroke-[2]"></i>
+            </div>
+            <span class="text-[10px] font-medium tracking-tight">Profile</span>
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- SCREEN 3: Profile (Just 3 Fields: Name, Email, Password) -->
+    <!-- ========================================== -->
+    <div class="flex flex-col items-center">
+      <div class="text-xs font-bold uppercase tracking-wider text-[#64748B] mb-2 flex items-center gap-1.5">
+        <span class="px-2 py-0.5 rounded bg-[#121926] text-white text-[10px]">SCREEN 3</span>
+        <span>Minimal Account Profile</span>
+      </div>
+
+      <!-- Mobile Shell -->
+      <div class="w-[380px] h-[780px] bg-[#FCFBF7] rounded-[42px] p-4 shadow-2xl border-[8px] border-[#1D2A44] flex flex-col relative overflow-hidden">
+        
+        <!-- Status Bar -->
+        <div class="flex items-center justify-between px-3 pt-1 pb-2 text-[12px] font-semibold text-[#121926]">
+          <span>9:41</span>
+          <div class="w-20 h-4 bg-[#1D2A44] rounded-full mx-auto"></div>
+          <div class="flex items-center gap-1.5">
+            <i data-lucide="signal" class="w-3 h-3 text-[#121926]"></i>
+            <i data-lucide="wifi" class="w-3 h-3 text-[#121926]"></i>
+            <i data-lucide="battery" class="w-3.5 h-3.5 text-[#121926]"></i>
+          </div>
+        </div>
+
+        <!-- App Header -->
+        <div class="flex items-center justify-between px-2 pt-2 pb-4 border-b border-[#E5E2D6]">
+          <div>
+            <div class="text-[10px] font-mono uppercase tracking-wider text-[#9683B8] font-bold">USER // ACCOUNT</div>
+            <h2 class="text-2xl font-bold text-[#1D2A44] tracking-tight">Profile</h2>
+          </div>
+          <div class="w-9 h-9 rounded-xl bg-[#F0EFE9] border border-[#E5E2D6] flex items-center justify-center text-[#1D2A44]">
+            <i data-lucide="shield-check" class="w-4 h-4"></i>
+          </div>
+        </div>
+
+        <!-- Minimal Header Note -->
+        <div class="mt-4 px-3 py-2 rounded-xl bg-[#F0EFE9] border border-[#E5E2D6] flex items-center gap-2">
+          <i data-lucide="database" class="w-4 h-4 text-[#9683B8]"></i>
+          <span class="text-xs font-medium text-[#121926]">MVP User Record (3 Fields)</span>
+        </div>
+
+        <!-- Main Form Area (Exactly 3 Fields: Name, Email, Password) -->
+        <div class="flex-1 overflow-y-auto custom-scroll mt-5 space-y-4 pr-1 pb-16">
+
+          <!-- Field 1: Name -->
+          <div class="bg-[#F0EFE9] border border-[#E5E2D6] rounded-2xl p-4 shadow-sm">
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#1D2A44] mb-1.5 flex items-center justify-between">
+              <span>Name</span>
+              <span class="text-[10px] font-mono text-[#64748B]">Required</span>
+            </label>
+            <div class="relative">
+              <input type="text" value="Sophia Chen" class="w-full bg-[#FCFBF7] border border-[#D9D6CC] rounded-xl px-3.5 py-2.5 text-sm text-[#121926] font-semibold focus:outline-none focus:border-[#1D2A44]" readonly>
+              <div class="absolute right-3 top-3 text-[#64748B]">
+                <i data-lucide="user" class="w-4 h-4"></i>
+              </div>
+            </div>
+            <p class="text-[11px] text-[#64748B] mt-1.5">Displayed to circle friends in shared wardrobes.</p>
+          </div>
+
+          <!-- Field 2: Email -->
+          <div class="bg-[#F0EFE9] border border-[#E5E2D6] rounded-2xl p-4 shadow-sm">
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#1D2A44] mb-1.5 flex items-center justify-between">
+              <span>Email</span>
+              <span class="text-[10px] font-mono text-[#64748B]">Verified</span>
+            </label>
+            <div class="relative">
+              <input type="email" value="sophia.chen@example.com" class="w-full bg-[#FCFBF7] border border-[#D9D6CC] rounded-xl px-3.5 py-2.5 text-sm text-[#121926] font-semibold focus:outline-none focus:border-[#1D2A44]" readonly>
+              <div class="absolute right-3 top-3 text-[#64748B]">
+                <i data-lucide="mail" class="w-4 h-4"></i>
+              </div>
+            </div>
+            <p class="text-[11px] text-[#64748B] mt-1.5">Used for authentication and share requests.</p>
+          </div>
+
+          <!-- Field 3: Password -->
+          <div class="bg-[#F0EFE9] border border-[#E5E2D6] rounded-2xl p-4 shadow-sm">
+            <label class="block text-xs font-bold uppercase tracking-wider text-[#1D2A44] mb-1.5 flex items-center justify-between">
+              <span>Password</span>
+              <span class="text-[10px] font-mono text-[#9683B8] font-bold">••••••••</span>
+            </label>
+            <div class="relative">
+              <input type="password" value="SuperSecretPassword123" class="w-full bg-[#FCFBF7] border border-[#D9D6CC] rounded-xl px-3.5 py-2.5 text-sm text-[#121926] font-mono tracking-widest focus:outline-none focus:border-[#1D2A44]" readonly>
+              <div class="absolute right-3 top-3 text-[#64748B]">
+                <i data-lucide="lock" class="w-4 h-4"></i>
+              </div>
+            </div>
+            <p class="text-[11px] text-[#64748B] mt-1.5">Last updated 2 months ago.</p>
+          </div>
+
+          <!-- Save / Update MVP Action -->
+          <div class="pt-2">
+            <button class="w-full py-3 rounded-xl bg-[#1D2A44] hover:bg-[#28395B] text-white text-xs font-bold uppercase tracking-wider transition shadow-md flex items-center justify-center gap-2">
+              <i data-lucide="save" class="w-4 h-4"></i>
+              Update Credentials
+            </button>
+          </div>
+
+        </div>
+
+        <!-- Fixed Bottom Navigation (Profile Active) -->
+        <div class="absolute bottom-3 left-4 right-4 bg-[#1D2A44] rounded-2xl px-6 py-2.5 flex items-center justify-between text-white shadow-xl z-20">
+          <!-- Nav 1: MyDrobe -->
+          <button class="flex flex-col items-center gap-0.5 text-[#E5E2D6]/70 hover:text-white transition">
+            <div class="w-9 h-6 flex items-center justify-center">
+              <i data-lucide="shirt" class="w-4 h-4 stroke-[2]"></i>
+            </div>
+            <span class="text-[10px] font-medium tracking-tight">MyDrobe</span>
+          </button>
+
+          <!-- Nav 2: ShareDrobe -->
+          <button class="flex flex-col items-center gap-0.5 text-[#E5E2D6]/70 hover:text-white transition">
+            <div class="w-9 h-6 flex items-center justify-center">
+              <i data-lucide="users" class="w-4 h-4 stroke-[2]"></i>
+            </div>
+            <span class="text-[10px] font-medium tracking-tight">ShareDrobe</span>
+          </button>
+
+          <!-- Nav 3: Profile (Active) -->
+          <button class="flex flex-col items-center gap-0.5 text-[#9683B8] relative">
+            <div class="w-9 h-6 rounded-lg bg-white/10 flex items-center justify-center">
+              <i data-lucide="user" class="w-4 h-4 stroke-[2.5]"></i>
+            </div>
+            <span class="text-[10px] font-bold tracking-tight">Profile</span>
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    lucide.createIcons();
+  </script>
+</body>
+</html>

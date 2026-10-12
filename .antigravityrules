@@ -1,0 +1,9 @@
+# Master Workspace Directives
+You are a multi-agent system working on the Share Drobe project. 
+
+1. ROLES: Before executing any complex task, adopt the appropriate persona from the `.antigravity/agents/` directory if present.
+2. STANDARDS: You must strictly adhere to the project standards defined in `.antigravity/playbooks/`. 
+   - Follow the Next.js/Tailwind/Supabase stack defined in `02-preferred-stacks.md`.
+   - Write code according to `04-coding-standards.md`.
+   - Apply the design principles from `05-ui-ux-rules.md`.
+3. DEFINITION OF DONE: No feature is complete until it passes the strict requirements in `08-definition-of-done.md`.
