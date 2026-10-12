@@ -33,25 +33,34 @@ npm run build
 # 5. Push Branch to Remote
 echo ""
 echo "🚀 Pushing branch '$CURRENT_BRANCH' to origin..."
-git push -u origin "$CURRENT_BRANCH"
+PUSHED=0
+if GIT_TERMINAL_PROMPT=0 git push -u origin "$CURRENT_BRANCH"; then
+  PUSHED=1
+  echo "✅ Branch pushed successfully."
+else
+  echo "⚠️ Note: Git remote credentials required. Please run:"
+  echo "   git push -u origin $CURRENT_BRANCH"
+fi
 
 # 6. Open or Link Pull Request
 echo ""
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+COMPARE_URL="https://github.com/sheen93/sharedrobe/compare/main...${CURRENT_BRANCH}?expand=1"
+
+if [ "$PUSHED" -eq 1 ] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   echo "🤖 GitHub CLI detected and authenticated."
   echo "Opening Pull Request against main..."
   gh pr create --base main --head "$CURRENT_BRANCH" --fill || {
     echo "ℹ️ Note: If a PR already exists, you can view it with 'gh pr view --web'."
   }
 else
-  COMPARE_URL="https://github.com/sheen93/sharedrobe/compare/main...${CURRENT_BRANCH}?expand=1"
   echo "=================================================="
-  echo "✅ Validation passed and branch pushed successfully!"
+  echo "🎉 Validation passed (lint, typecheck, and build)!"
   echo ""
-  echo "🔗 Open your Pull Request by visiting:"
+  echo "🔗 Open your Pull Request on GitHub by visiting:"
   echo "   $COMPARE_URL"
   echo ""
-  echo "💡 Tip: To enable automatic PR creation, install and authenticate 'gh':"
+  echo "💡 Tip: To enable automatic PR creation from the CLI in the future:"
+  echo "   Install and authenticate 'gh' (https://cli.github.com):"
   echo "   - Linux: sudo apt install gh && gh auth login"
   echo "   - macOS: brew install gh && gh auth login"
   echo "=================================================="
