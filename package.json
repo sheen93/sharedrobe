@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test": "node scripts/test-upload-edge-cases.mjs",
     "validate-and-pr": "bash scripts/validate-and-pr.sh"
   },
   "dependencies": {

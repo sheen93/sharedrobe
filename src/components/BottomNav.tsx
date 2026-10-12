@@ -54,18 +54,14 @@ export default function BottomNav({ className }: BottomNavProps) {
       </Link>
 
       {/* Nav 2: ShareDrobe */}
-      <button
-        type="button"
-        onClick={() => {
-          // Future MVP feature / trigger
-        }}
+      <Link
+        href="/sharedrobe"
         className={cn(
           "flex flex-col items-center gap-0.5 transition",
           isShareDrobe
             ? "text-dusty-lilac"
             : "text-border-neutral/70 hover:text-white"
         )}
-        title="ShareDrobe Circles (Coming Soon)"
       >
         <div
           className={cn(
@@ -73,7 +69,7 @@ export default function BottomNav({ className }: BottomNavProps) {
             isShareDrobe && "bg-white/10"
           )}
         >
-          <Users className="h-4 w-4 stroke-[2]" />
+          <Users className="h-4 w-4 stroke-[2.5]" />
         </div>
         <span
           className={cn(
@@ -83,7 +79,7 @@ export default function BottomNav({ className }: BottomNavProps) {
         >
           ShareDrobe
         </span>
-      </button>
+      </Link>
 
       {/* Nav 3: Profile */}
       <Link

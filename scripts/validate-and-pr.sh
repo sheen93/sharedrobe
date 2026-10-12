@@ -22,12 +22,17 @@ npm run lint
 
 # 3. TypeScript Typecheck
 echo ""
-echo "🧩 [2/3] Checking TypeScript types..."
+echo "🧩 [2/4] Checking TypeScript types..."
 npm run typecheck
 
-# 4. Production Next.js Build
+# 4. QA Edge Case Tests
 echo ""
-echo "📦 [3/3] Building Next.js application..."
+echo "🧪 [3/4] Running QA edge case test suite..."
+npm test
+
+# 5. Production Next.js Build
+echo ""
+echo "📦 [4/4] Building Next.js application..."
 npm run build
 
 # 5. Push Branch to Remote
