@@ -1,24 +1,44 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap");
 @import "tailwindcss";
 
+/*
+ * Share Drobe design tokens — "Parisian Navy & Dusty Lilac" palette.
+ * Source of truth: stitch-brief.md + stitch-reference/(mockup)/code.html.
+ */
 @theme {
-  --color-cream: #FEFDF5;
-  --color-beige: #F3EFE0;
-  --color-sage: #8A9A5B;
-  --color-sage-light: #A3B18A;
-  --color-sage-dark: #78874E;
-  --color-charcoal: #2C3539;
-  --color-taupe: #79746E;
+  /* Canvas & surfaces */
+  --color-buttercream: #FCFBF7; /* Primary canvas & screen background, input fill */
+  --color-chalk: #F0EFE9; /* Card surfaces, folder rows, field cards */
+  --color-linen: #F4F2EB; /* Outer page backdrop behind the app shell */
+
+  /* Brand */
+  --color-french-navy: #1D2A44; /* Primary buttons, bottom navigation, headings */
+  --color-french-navy-hover: #28395B; /* Hover state for French Navy surfaces */
+  --color-dusty-lilac: #9683B8; /* Secondary accent, active highlights, badges */
+
+  /* Typography */
+  --color-midnight-slate: #121926; /* Primary high-contrast text */
+  --color-graphite: #475467; /* Long-form secondary copy */
+  --color-muted: #64748B; /* Secondary labels, metadata, monospaced counters */
+
+  /* Borders */
+  --color-border-neutral: #E5E2D6; /* Dividers, card borders, form outlines */
+  --color-border-strong: #D9D6CC; /* Input outlines, icon tiles, scrollbar thumb */
+}
+
+@theme inline {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 :root {
-  --background: #FEFDF5;
-  --foreground: #2C3539;
+  --background: var(--color-buttercream);
+  --foreground: var(--color-midnight-slate);
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
   margin: 0;
   padding: 0;
 }
@@ -30,4 +50,14 @@ body {
 .hide-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Slim scrollbar used for vertical lists (matches Stitch `.custom-scroll`) */
+.custom-scroll::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.custom-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 4px;
 }

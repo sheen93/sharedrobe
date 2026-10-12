@@ -1,38 +1,117 @@
 "use client";
 
 import React from "react";
-import { Shirt, Sparkles, Users } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Shirt, Users, User } from "lucide-react";
+import { cn } from "@/utils/cn";
 
-export default function BottomNav() {
-  const activeTab = "closet"; 
+interface BottomNavProps {
+  className?: string;
+}
 
-  const navItems = [
-    { id: "closet", label: "Closet", icon: Shirt },
-    { id: "outfits", label: "Outfits", icon: Sparkles },
-    { id: "friends", label: "Friends", icon: Users },
-  ];
+export default function BottomNav({ className }: BottomNavProps) {
+  const pathname = usePathname();
+
+  const isMyDrobe = pathname === "/";
+  const isProfile = pathname.startsWith("/profile");
+  const isShareDrobe = pathname.startsWith("/sharedrobe");
 
   return (
-    <nav className="fixed bottom-0 w-full bg-cream border-t border-beige px-6 py-3 pb-safe z-40">
-      <div className="max-w-md mx-auto flex justify-between items-center">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          return (
-            <button
-              key={item.id}
-              className={`flex flex-col items-center gap-1 transition-colors ${
-                isActive ? "text-sage" : "text-taupe hover:text-sage-light"
-              }`}
-            >
-              <Icon size={24} strokeWidth={isActive ? 2.5 : 2} />
-              <span className="text-[10px] font-semibold tracking-wide uppercase">
-                {item.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+    <nav
+      aria-label="Main Navigation"
+      className={cn(
+        "fixed bottom-3 left-4 right-4 z-40 mx-auto flex max-w-md items-center justify-between rounded-2xl bg-french-navy px-6 py-2.5 text-white shadow-xl",
+        className
+      )}
+    >
+      {/* Nav 1: MyDrobe */}
+      <Link
+        href="/"
+        className={cn(
+          "flex flex-col items-center gap-0.5 transition",
+          isMyDrobe
+            ? "text-dusty-lilac"
+            : "text-border-neutral/70 hover:text-white"
+        )}
+      >
+        <div
+          className={cn(
+            "flex h-6 w-9 items-center justify-center rounded-lg",
+            isMyDrobe && "bg-white/10"
+          )}
+        >
+          <Shirt className="h-4 w-4 stroke-[2.5]" />
+        </div>
+        <span
+          className={cn(
+            "text-[10px] tracking-tight",
+            isMyDrobe ? "font-bold" : "font-medium"
+          )}
+        >
+          MyDrobe
+        </span>
+      </Link>
+
+      {/* Nav 2: ShareDrobe */}
+      <button
+        type="button"
+        onClick={() => {
+          // Future MVP feature / trigger
+        }}
+        className={cn(
+          "flex flex-col items-center gap-0.5 transition",
+          isShareDrobe
+            ? "text-dusty-lilac"
+            : "text-border-neutral/70 hover:text-white"
+        )}
+        title="ShareDrobe Circles (Coming Soon)"
+      >
+        <div
+          className={cn(
+            "flex h-6 w-9 items-center justify-center rounded-lg",
+            isShareDrobe && "bg-white/10"
+          )}
+        >
+          <Users className="h-4 w-4 stroke-[2]" />
+        </div>
+        <span
+          className={cn(
+            "text-[10px] tracking-tight",
+            isShareDrobe ? "font-bold" : "font-medium"
+          )}
+        >
+          ShareDrobe
+        </span>
+      </button>
+
+      {/* Nav 3: Profile */}
+      <Link
+        href="/profile"
+        className={cn(
+          "flex flex-col items-center gap-0.5 transition",
+          isProfile
+            ? "text-dusty-lilac"
+            : "text-border-neutral/70 hover:text-white"
+        )}
+      >
+        <div
+          className={cn(
+            "flex h-6 w-9 items-center justify-center rounded-lg",
+            isProfile && "bg-white/10"
+          )}
+        >
+          <User className="h-4 w-4 stroke-[2.5]" />
+        </div>
+        <span
+          className={cn(
+            "text-[10px] tracking-tight",
+            isProfile ? "font-bold" : "font-medium"
+          )}
+        >
+          Profile
+        </span>
+      </Link>
     </nav>
   );
 }
