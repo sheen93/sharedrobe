@@ -1,0 +1,575 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
+import { createClient } from "@/utils/supabase/server";
+import {
+  sendFriendRequestEmail,
+  sendCircleJoinRequestEmail,
+} from "@/utils/email/resend";
+
+export type ActionResult<T = unknown> =
+  | { success: true; message: string; data?: T; notificationSent?: boolean }
+  | { success: false; error: string; fieldErrors?: Record<string, string> };
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isValidUuid(id: unknown): id is string {
+  return typeof id === "string" && UUID_REGEX.test(id.trim());
+}
+
+async function getRequestOrigin(): Promise<string> {
+  const headerList = await headers();
+  const origin = headerList.get("origin");
+  if (origin) return origin;
+  const host = headerList.get("x-forwarded-host") ?? headerList.get("host");
+  if (host) {
+    const protocol = headerList.get("x-forwarded-proto") ?? "https";
+    return `${protocol}://${host}`;
+  }
+  return "https://sharedrobe.app";
+}
+
+/**
+ * Sends a friend request to a target user by their UUID.
+ * Dispatches a Resend notification email to the target recipient.
+ */
+export async function sendFriendRequest(
+  targetUserId: string
+): Promise<ActionResult<{ friendshipId: string }>> {
+  if (!isValidUuid(targetUserId)) {
+    return { success: false, error: "Invalid target user ID specified." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      success: false,
+      error: "Your session has expired. Please sign in to send friend requests.",
+    };
+  }
+
+  if (user.id === targetUserId) {
+    return {
+      success: false,
+      error: "You cannot send a friend request to yourself.",
+    };
+  }
+
+  // 1. Fetch target user's profile
+  const { data: targetProfile, error: profileErr } = await supabase
+    .from("profiles")
+    .select("id, full_name, email")
+    .eq("id", targetUserId)
+    .maybeSingle();
+
+  if (profileErr || !targetProfile) {
+    return {
+      success: false,
+      error: "The specified user profile could not be found.",
+    };
+  }
+
+  // 2. Check for existing friendship in either direction
+  const { data: existing, error: existingErr } = await supabase
+    .from("friendships")
+    .select("id, requester_id, addressee_id, status")
+    .or(
+      `and(requester_id.eq.${user.id},addressee_id.eq.${targetUserId}),and(requester_id.eq.${targetUserId},addressee_id.eq.${user.id})`
+    )
+    .maybeSingle();
+
+  if (existingErr) {
+    return { success: false, error: existingErr.message };
+  }
+
+  if (existing) {
+    if (existing.status === "accepted") {
+      return { success: false, error: "You are already connected as friends." };
+    }
+    if (existing.requester_id === user.id) {
+      return {
+        success: false,
+        error: "You have already sent a friend request to this member.",
+      };
+    }
+    return {
+      success: false,
+      error: "This member has already sent you a friend request. Check your pending requests tab.",
+    };
+  }
+
+  // 3. Insert friendship
+  const { data: inserted, error: insertErr } = await supabase
+    .from("friendships")
+    .insert({
+      requester_id: user.id,
+      addressee_id: targetUserId,
+      status: "pending",
+    })
+    .select("id")
+    .single();
+
+  if (insertErr || !inserted) {
+    return {
+      success: false,
+      error: insertErr?.message || "Failed to create friend request.",
+    };
+  }
+
+  // 4. Trigger transactional notification email via Resend
+  let notificationSent = false;
+  try {
+    const origin = await getRequestOrigin();
+    const senderName =
+      user.user_metadata?.full_name ||
+      user.user_metadata?.name ||
+      "A fellow Share Drobe member";
+
+    const emailResult = await sendFriendRequestEmail({
+      toEmail: targetProfile.email,
+      toName: targetProfile.full_name || "Friend",
+      fromName: senderName,
+      appUrl: origin,
+    });
+    notificationSent = Boolean(emailResult.success);
+  } catch (err) {
+    console.warn("[FriendRequest] Non-fatal notification error:", err);
+  }
+
+  revalidatePath("/sharedrobe");
+  return {
+    success: true,
+    message: `Friend request sent to ${targetProfile.full_name || "user"}.`,
+    data: { friendshipId: inserted.id },
+    notificationSent,
+  };
+}
+
+/**
+ * Responds to an incoming friend request (accept or decline).
+ */
+export async function respondToFriendRequest(
+  friendshipId: string,
+  action: "accept" | "decline"
+): Promise<ActionResult> {
+  if (!isValidUuid(friendshipId)) {
+    return { success: false, error: "Invalid friendship ID provided." };
+  }
+
+  if (action !== "accept" && action !== "decline") {
+    return { success: false, error: "Action must be either accept or decline." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "Authentication required." };
+  }
+
+  // Verify the friendship exists and current user is the addressee
+  const { data: friendship, error: fetchErr } = await supabase
+    .from("friendships")
+    .select("id, requester_id, addressee_id, status")
+    .eq("id", friendshipId)
+    .maybeSingle();
+
+  if (fetchErr || !friendship) {
+    return {
+      success: false,
+      error: "Friend request was not found or has already been resolved.",
+    };
+  }
+
+  if (friendship.addressee_id !== user.id) {
+    return {
+      success: false,
+      error: "You are not authorized to respond to this friend request.",
+    };
+  }
+
+  if (action === "accept") {
+    const { error: updateErr } = await supabase
+      .from("friendships")
+      .update({
+        status: "accepted",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", friendshipId);
+
+    if (updateErr) {
+      return { success: false, error: updateErr.message };
+    }
+
+    revalidatePath("/sharedrobe");
+    return { success: true, message: "Friend request accepted! You are now connected." };
+  } else {
+    const { error: deleteErr } = await supabase
+      .from("friendships")
+      .delete()
+      .eq("id", friendshipId);
+
+    if (deleteErr) {
+      return { success: false, error: deleteErr.message };
+    }
+
+    revalidatePath("/sharedrobe");
+    return { success: true, message: "Friend request declined." };
+  }
+}
+
+/**
+ * Creates a new sharing Circle.
+ * Automatically designates creator as an approved Admin via database trigger.
+ */
+export async function createCircle(
+  name: string,
+  description?: string
+): Promise<ActionResult<{ circleId: string; name: string }>> {
+  const trimmedName = typeof name === "string" ? name.trim() : "";
+  if (trimmedName.length < 2 || trimmedName.length > 50) {
+    return {
+      success: false,
+      error: "Circle name must be between 2 and 50 characters long.",
+      fieldErrors: { name: "Name must be 2-50 characters" },
+    };
+  }
+
+  const trimmedDesc = typeof description === "string" ? description.trim() : null;
+  if (trimmedDesc && trimmedDesc.length > 250) {
+    return {
+      success: false,
+      error: "Circle description cannot exceed 250 characters.",
+      fieldErrors: { description: "Maximum 250 characters" },
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "Authentication required to create a circle." };
+  }
+
+  const { data: circle, error: insertErr } = await supabase
+    .from("circles")
+    .insert({
+      name: trimmedName,
+      description: trimmedDesc,
+      created_by: user.id,
+    })
+    .select("id, name")
+    .single();
+
+  if (insertErr || !circle) {
+    return {
+      success: false,
+      error: insertErr?.message || "Failed to create sharing circle.",
+    };
+  }
+
+  revalidatePath("/sharedrobe");
+  return {
+    success: true,
+    message: `Circle "${circle.name}" created successfully.`,
+    data: { circleId: circle.id, name: circle.name },
+  };
+}
+
+/**
+ * Requests membership to join an existing Circle.
+ * Dispatches an email notification to the Circle Admin.
+ */
+export async function requestJoinCircle(
+  circleId: string
+): Promise<ActionResult<{ membershipId: string }>> {
+  if (!isValidUuid(circleId)) {
+    return { success: false, error: "Invalid circle ID provided." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "Authentication required to join circles." };
+  }
+
+  // 1. Fetch circle details
+  const { data: circle, error: circleErr } = await supabase
+    .from("circles")
+    .select("id, name, created_by")
+    .eq("id", circleId)
+    .maybeSingle();
+
+  if (circleErr || !circle) {
+    return { success: false, error: "Circle could not be found." };
+  }
+
+  // 2. Check existing membership status
+  const { data: existingMember, error: memCheckErr } = await supabase
+    .from("circle_members")
+    .select("id, role, status")
+    .eq("circle_id", circleId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (memCheckErr) {
+    return { success: false, error: memCheckErr.message };
+  }
+
+  if (existingMember) {
+    if (existingMember.status === "approved") {
+      return { success: false, error: "You are already an active member of this circle." };
+    }
+    return {
+      success: false,
+      error: "Your request to join this circle is already pending review.",
+    };
+  }
+
+  // 3. Insert membership request
+  const { data: inserted, error: insertErr } = await supabase
+    .from("circle_members")
+    .insert({
+      circle_id: circleId,
+      user_id: user.id,
+      role: "member",
+      status: "pending",
+    })
+    .select("id")
+    .single();
+
+  if (insertErr || !inserted) {
+    return {
+      success: false,
+      error: insertErr?.message || "Failed to submit circle membership request.",
+    };
+  }
+
+  // 4. Send email notification to circle admin
+  let notificationSent = false;
+  try {
+    const { data: adminProfile } = await supabase
+      .from("profiles")
+      .select("email, full_name")
+      .eq("id", circle.created_by)
+      .maybeSingle();
+
+    if (adminProfile?.email) {
+      const origin = await getRequestOrigin();
+      const requesterName =
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        "A Share Drobe member";
+
+      const emailResult = await sendCircleJoinRequestEmail({
+        adminEmail: adminProfile.email,
+        adminName: adminProfile.full_name || "Admin",
+        requesterName,
+        circleName: circle.name,
+        appUrl: origin,
+      });
+      notificationSent = Boolean(emailResult.success);
+    }
+  } catch (err) {
+    console.warn("[CircleJoinRequest] Non-fatal notification error:", err);
+  }
+
+  revalidatePath("/sharedrobe");
+  return {
+    success: true,
+    message: `Request to join "${circle.name}" submitted for approval.`,
+    data: { membershipId: inserted.id },
+    notificationSent,
+  };
+}
+
+/**
+ * Shares an item from the user's private wardrobe into a shared Circle.
+ */
+export async function shareItemToCircle(
+  circleId: string,
+  itemId: string
+): Promise<ActionResult<{ circleItemId: string }>> {
+  if (!isValidUuid(circleId)) {
+    return { success: false, error: "Invalid circle ID specified." };
+  }
+  if (!isValidUuid(itemId)) {
+    return { success: false, error: "Invalid item ID specified." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "Authentication required to share garments." };
+  }
+
+  // 1. Verify user is an approved member of this circle
+  const { data: member, error: memberErr } = await supabase
+    .from("circle_members")
+    .select("id, status")
+    .eq("circle_id", circleId)
+    .eq("user_id", user.id)
+    .eq("status", "approved")
+    .maybeSingle();
+
+  if (memberErr || !member) {
+    return {
+      success: false,
+      error: "You must be an approved member of this circle to share wardrobe items.",
+    };
+  }
+
+  // 2. Verify user owns the item
+  const { data: item, error: itemErr } = await supabase
+    .from("items")
+    .select("id, title, owner_id")
+    .eq("id", itemId)
+    .eq("owner_id", user.id)
+    .maybeSingle();
+
+  if (itemErr || !item) {
+    return {
+      success: false,
+      error: "Garment not found or does not belong to your account.",
+    };
+  }
+
+  // 3. Verify item is not already shared to this circle
+  const { data: existingShare, error: shareCheckErr } = await supabase
+    .from("circle_items")
+    .select("id")
+    .eq("circle_id", circleId)
+    .eq("item_id", itemId)
+    .maybeSingle();
+
+  if (shareCheckErr) {
+    return { success: false, error: shareCheckErr.message };
+  }
+
+  if (existingShare) {
+    return {
+      success: false,
+      error: `"${item.title}" is already shared to this circle.`,
+    };
+  }
+
+  // 4. Insert into circle_items junction table
+  const { data: shared, error: insertErr } = await supabase
+    .from("circle_items")
+    .insert({
+      circle_id: circleId,
+      item_id: itemId,
+      shared_by: user.id,
+    })
+    .select("id")
+    .single();
+
+  if (insertErr || !shared) {
+    return {
+      success: false,
+      error: insertErr?.message || "Failed to share item to circle.",
+    };
+  }
+
+  revalidatePath("/sharedrobe");
+  revalidatePath("/");
+  return {
+    success: true,
+    message: `"${item.title}" is now shared in circle!`,
+    data: { circleItemId: shared.id },
+  };
+}
+
+/**
+ * Circle Admin approves or rejects a pending circle member request.
+ */
+export async function respondToCircleMemberRequest(
+  membershipId: string,
+  decision: "approve" | "reject"
+): Promise<ActionResult> {
+  if (!isValidUuid(membershipId)) {
+    return { success: false, error: "Invalid membership ID provided." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "Authentication required." };
+  }
+
+  // 1. Fetch membership and circle info
+  const { data: memberRecord, error: memErr } = await supabase
+    .from("circle_members")
+    .select("id, circle_id, user_id, status")
+    .eq("id", membershipId)
+    .maybeSingle();
+
+  if (memErr || !memberRecord) {
+    return { success: false, error: "Member request could not be found." };
+  }
+
+  // 2. Verify current user is an admin of the circle
+  const { data: adminCheck } = await supabase
+    .from("circle_members")
+    .select("id")
+    .eq("circle_id", memberRecord.circle_id)
+    .eq("user_id", user.id)
+    .eq("role", "admin")
+    .eq("status", "approved")
+    .maybeSingle();
+
+  if (!adminCheck) {
+    return {
+      success: false,
+      error: "You are not an authorized admin for this circle.",
+    };
+  }
+
+  if (decision === "approve") {
+    const { error: updateErr } = await supabase
+      .from("circle_members")
+      .update({
+        status: "approved",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", membershipId);
+
+    if (updateErr) {
+      return { success: false, error: updateErr.message };
+    }
+
+    revalidatePath("/sharedrobe");
+    return { success: true, message: "Member request approved!" };
+  } else {
+    const { error: deleteErr } = await supabase
+      .from("circle_members")
+      .delete()
+      .eq("id", membershipId);
+
+    if (deleteErr) {
+      return { success: false, error: deleteErr.message };
+    }
+
+    revalidatePath("/sharedrobe");
+    return { success: true, message: "Member request declined." };
+  }
+}
