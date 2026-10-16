@@ -2,8 +2,8 @@
 
 > **Document Type:** Multi-Agent System Handoff & System State Blueprint  
 > **Repository:** `sheen93/sharedrobe`  
-> **Last Updated:** October 15, 2026 (Local Time: 22:56 EDT)  
-> **Current Stable Commit on `main`:** `4829c05`  
+> **Last Updated:** October 16, 2026 (Local Time: 18:15 EDT)  
+> **Current Stable Commit on `main`:** `e835bca`  
 > **Active Environment:** Next.js 16.3.5 (App Router, Turbopack) / React 19 / TypeScript 5 / Tailwind CSS v4 / Supabase (@supabase/ssr)
 
 ---
@@ -119,6 +119,38 @@ This document serves as an exhaustive, definitive record of every engineering de
 
 ---
 
+### Milestone 5: Phase 2 Social Engine — Circles, Friends, Real-Time Search & Garment Sharing (`feat/phase2-friends-and-circles`)
+- **Part 1: Database Architecture & Circle-Aware RLS (`supabase/migrations/20261016000000_phase2_social.sql`):**
+  - `profiles`: Synced with `auth.users(id)` via trigger `on_auth_user_created` and idempotent backfill script.
+  - `friendships`: Canonical pair index `(LEAST(requester_id, addressee_id), GREATEST(requester_id, addressee_id))` and check constraint preventing self-friending.
+  - `circles` & `circle_members`: Group hierarchy with `admin` and `member` roles. Trigger automatically adds circle creators as approved admins.
+  - `circle_items`: Junction table tracking which garments are shared to which circles.
+  - RLS Anti-Recursion Architecture: `SECURITY DEFINER` STABLE functions (`is_circle_admin`, `is_circle_member`, `is_item_shared_with_user`) to bypass Postgres recursive policy evaluation.
+  - Updated `items` RLS policy `items_select_owner_or_circle_policy`: items are visible to their owner OR any approved member of a mutual circle where the item is shared.
+- **Part 2: Typed Server Actions & Resend Email Integration (`src/app/sharedrobe/actions.ts` & `src/utils/email/resend.ts`):**
+  - Resend SDK integration with Stitch-styled transactional HTML emails for friend requests and circle member applications.
+  - Graceful error boundary: missing `RESEND_API_KEY` or transient mail network timeouts are caught safely (`skipped: true`), preventing database rollback.
+  - Fully typed actions: `sendFriendRequest`, `respondToFriendRequest`, `createCircle`, `requestJoinCircle`, `shareItemToCircle`, `getUserApprovedCirclesForItem`, `shareItemToCircles`, `respondToCircleMemberRequest`, and `searchSocial`.
+- **Part 3: Community Hub UI (`src/app/sharedrobe/`):**
+  - SSR data prefetching in Server Component `src/app/sharedrobe/page.tsx`.
+  - Live client view `SharedrobeClient.tsx` with 3 segmented tabs:
+    - **My Circles:** Displays approved circles, admin tags, member counts, shared garment galleries, and pending circle requests.
+    - **My Friends:** Displays connected friends with two-letter avatar badges, emails, and outgoing requests.
+    - **Search:** Real-time debounced fuzzy search with loading spinners, filter pills (`All`, `People`, `Circles`), and contextual action buttons (`+ Add Friend`, `Join Circle`, `Connected`, `Member`).
+  - Prominent **Pending Action Requests** banner allowing 1-tap accept/decline for incoming friend and circle requests.
+  - `CreateCircleModal.tsx` for creating circles with character validation.
+- **Part 4: Garment Sharing Integration (`src/components/ShareItemModal.tsx` & `src/app/MyDrobeClient.tsx`):**
+  - Item cards in MyDrobe updated with a dedicated "Share" button and circle count indicator (`Private` vs. `In X Circles`).
+  - `ShareItemModal.tsx` fetches user's approved circles, displays an interactive checklist, disables already-shared circles, and executes batch sharing with duplicate prevention.
+- **Validation & Quality Gates:**
+  - 0 ESLint errors (ESLint 9 compliant).
+  - 0 TypeScript errors (`tsc --noEmit`).
+  - 27/27 automated QA edge-case tests passing (`npm test`).
+  - Next.js 16 Turbopack production build succeeded (`npm run build`).
+- **Merged to `main` at commit `e835bca`.**
+
+---
+
 ## 3. Current Architecture & File-by-File Blueprint
 
 ```
@@ -127,6 +159,7 @@ sharedrobe/
 ├── docs/
 │   └── AUTH.md                     # Supabase authentication & deployment guide
 ├── scripts/
+│   ├── test-social-actions-edge-cases.mjs # QA Advocate social actions test suite (13 tests)
 │   ├── test-upload-edge-cases.mjs  # QA Advocate automated edge-case test suite (14 tests)
 │   └── validate-and-pr.sh          # CI pre-PR pipeline (lint -> typecheck -> test -> build -> push)
 ├── src/
@@ -140,11 +173,13 @@ sharedrobe/
 │   │   │   ├── page.tsx            # Server Component fetching authenticated user
 │   │   │   └── ProfileClient.tsx   # Interactive profile form with password modal trigger
 │   │   ├── sharedrobe/
-│   │   │   └── page.tsx            # Community Sharing Hub (Screen 2 Stitch mockup)
+│   │   │   ├── actions.ts          # Phase 2 Server actions (friends, circles, item sharing)
+│   │   │   ├── page.tsx            # Community Hub SSR Server Component prefetching circles & friends
+│   │   │   └── SharedrobeClient.tsx # 3-tab UI: My Circles, My Friends, Real-Time Search & Pending Requests
 │   │   ├── globals.css             # Tailwind v4 @theme design tokens (Parisian Navy & Dusty Lilac)
 │   │   ├── layout.tsx              # Root HTML shell with typography & viewport settings
 │   │   ├── page.tsx                # Server Component: authenticates & prefetches MyDrobe items via SSR
-│   │   └── MyDrobeClient.tsx       # Hydrated client view: in-memory category filter, AddItemModal trigger
+│   │   └── MyDrobeClient.tsx       # Hydrated client view: in-memory category filter, ShareItemModal trigger
 │   ├── components/
 │   │   ├── ui/
 │   │   │   ├── FieldCard.tsx       # Stitch-styled chalk form card with labels & captions
@@ -154,7 +189,9 @@ sharedrobe/
 │   │   │   ├── ScreenHeader.tsx    # Header with uppercase mono breadcrumb + screen title
 │   │   │   └── SubmitButton.tsx    # Accessible CTA button with pending loader (useFormStatus)
 │   │   ├── AddItemModal.tsx        # Camera/upload modal with compression & error handling
-│   │   └── BottomNav.tsx           # Floating Parisian Navy 3-tab pill (MyDrobe, ShareDrobe, Profile)
+│   │   ├── BottomNav.tsx           # Floating Parisian Navy 3-tab pill (MyDrobe, ShareDrobe, Profile)
+│   │   ├── CreateCircleModal.tsx   # Modal for creating new wardrobe circles
+│   │   └── ShareItemModal.tsx      # Modal for sharing garments into approved circles
 │   ├── proxy.ts                    # Next.js 16 route proxy (middleware replacement)
 │   └── utils/
 │       ├── auth/
@@ -162,6 +199,8 @@ sharedrobe/
 │       │   ├── form-state.ts       # Type definitions for form state across server actions
 │       │   └── validation.ts       # Pure validators for sign in, sign up, profile, passwords
 │       ├── cn.ts                   # Tailwind class merge utility (clsx + twMerge)
+│       ├── email/
+│       │   └── resend.ts           # Resend email notification client & transactional HTML templates
 │       ├── supabase/
 │       │   ├── client.ts           # Singleton browser Supabase client (prevents mobile navigator.locks deadlock)
 │       │   ├── env.ts              # Strongly-typed environment variable validator
@@ -171,7 +210,8 @@ sharedrobe/
 ├── supabase/
 │   └── migrations/
 │       ├── 20261012000000_auth_owner_rls.sql     # Baseline owner_id column & RLS setup
-│       └── 20261012000001_rls_insert_policy.sql  # Strict RLS (auth.uid() = owner_id) & Storage policies
+│       ├── 20261012000001_rls_insert_policy.sql  # Strict RLS (auth.uid() = owner_id) & Storage policies
+│       └── 20261016000000_phase2_social.sql      # Phase 2 Social Engine: profiles, circles, friends, RLS
 ├── next.config.ts                  # Allowed dev origins (192.168.1.153, 192.168.*.*, etc.) for mobile LAN dev
 ├── package.json                    # Scripts & dependencies
 └── tsconfig.json                   # Strict TypeScript compiler options
@@ -231,6 +271,67 @@ The active migration is `supabase/migrations/20261012000001_rls_insert_policy.sq
   - `SELECT`: Public read enabled for item display.
   - `UPDATE` / `DELETE`: Authenticated users can only modify/delete files in their own folder.
 
+### 5.4 Phase 2 Social Schema & Anti-Recursion RLS (`20261016000000_phase2_social.sql`)
+```sql
+-- profiles (mirrors auth.users)
+create table public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  full_name text,
+  email text,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- friendships
+create table public.friendships (
+  id uuid primary key default gen_random_uuid(),
+  requester_id uuid not null references public.profiles(id) on delete cascade,
+  addressee_id uuid not null references public.profiles(id) on delete cascade,
+  status public.friendship_status not null default 'pending', -- 'pending', 'accepted'
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  updated_at timestamptz default timezone('utc'::text, now()) not null,
+  check (requester_id <> addressee_id)
+);
+
+-- circles & circle_members
+create table public.circles (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  description text,
+  creator_id uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz default timezone('utc'::text, now()) not null
+);
+
+create table public.circle_members (
+  id uuid primary key default gen_random_uuid(),
+  circle_id uuid not null references public.circles(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  role public.circle_role not null default 'member', -- 'admin', 'member'
+  status public.circle_member_status not null default 'pending', -- 'pending', 'approved'
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  unique (circle_id, user_id)
+);
+
+-- circle_items
+create table public.circle_items (
+  id uuid primary key default gen_random_uuid(),
+  circle_id uuid not null references public.circles(id) on delete cascade,
+  item_id uuid not null references public.items(id) on delete cascade,
+  shared_by uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  unique (circle_id, item_id)
+);
+```
+
+#### Anti-Recursion Security Definer Functions:
+In Postgres/Supabase, querying `circle_members` within a `circle_members` policy creates infinite recursion (`42P17`). This is resolved using `SECURITY DEFINER` functions with fixed search paths:
+- `public.is_circle_admin(check_circle_id uuid, check_user_id uuid) returns boolean`
+- `public.is_circle_member(check_circle_id uuid, check_user_id uuid) returns boolean`
+- `public.is_item_shared_with_user(check_item_id uuid, check_user_id uuid) returns boolean`
+
+#### Circle-Aware Garment RLS:
+`public.items` policy `items_select_owner_or_circle_policy`:
+- Garments are visible to their owner (`auth.uid() = owner_id`) OR any user where `public.is_item_shared_with_user(id, auth.uid())` returns true.
+
 ---
 
 ## 6. QA Verification Matrix & Test Results
@@ -239,14 +340,14 @@ Run all checks locally with:
 ```bash
 npm run lint         # ESLint 9 (0 errors, 0 warnings)
 npm run typecheck    # TypeScript 5 (No type errors)
-npm test             # QA Advocate upload failure test suite (14 passing tests)
+npm test             # QA Advocate unified test suites (27 passing tests)
 npm run build        # Next.js 16 Turbopack build (All routes compiled)
 ```
 
 ### Automated Edge Case Test Run Output
 ```
 > sharedrobe@0.1.0 test
-> node scripts/test-upload-edge-cases.mjs
+> node scripts/test-upload-edge-cases.mjs && node scripts/test-social-actions-edge-cases.mjs
 
 ==================================================
   QA Advocate: Upload Edge Cases & Error Verification
@@ -266,7 +367,26 @@ npm run build        # Next.js 16 Turbopack build (All routes compiled)
   ✅ [PASS] Scenario 4C: DB insert foreign key error (Code 23503)
   ✅ [PASS] Scenario 4D: Generic database insert error
 ==================================================
-🎉 All 14 QA edge case test scenarios PASSED!
+🎉 All 14 Upload QA edge case test scenarios PASSED!
+
+==================================================
+  QA Advocate: Phase 2 Social Actions Edge Cases
+==================================================
+  ✅ [PASS] Friend Request 1A: Rejects missing recipient
+  ✅ [PASS] Friend Request 1B: Rejects self-friending
+  ✅ [PASS] Friend Request 1C: Rejects non-existent addressee profile
+  ✅ [PASS] Respond Friend 2A: Rejects unauthorized user responding
+  ✅ [PASS] Create Circle 3A: Rejects empty circle name
+  ✅ [PASS] Create Circle 3B: Rejects whitespace-only circle name
+  ✅ [PASS] Create Circle 3C: Truncates/rejects names exceeding 50 chars
+  ✅ [PASS] Join Circle 4A: Rejects joining non-existent circle
+  ✅ [PASS] Share Item 5A: Rejects non-owner attempting to share item
+  ✅ [PASS] Share Item 5B: Rejects non-member attempting to share to circle
+  ✅ [PASS] Share Item 5C: Rejects pending circle member attempting to share
+  ✅ [PASS] Resend Boundary 6A: Gracefully skips email when RESEND_API_KEY is missing
+  ✅ [PASS] Resend Boundary 6B: Catches and logs Resend SDK network failure without failing action
+==================================================
+🎉 All 13 Social QA edge case test scenarios PASSED!
 ```
 
 ---
@@ -279,10 +399,12 @@ For any developer or agent running this repository on a fresh Supabase project:
    ```env
    NEXT_PUBLIC_SUPABASE_URL=https://<your-project-id>.supabase.co
    NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
+   RESEND_API_KEY=re_... # Optional: transactional emails for friend/circle requests
    ```
 2. **Execute Migrations in SQL Editor:**
    - Run `supabase/migrations/20261012000000_auth_owner_rls.sql`
    - Run `supabase/migrations/20261012000001_rls_insert_policy.sql`
+   - Run `supabase/migrations/20261016000000_phase2_social.sql`
    - Confirm that the `item_category` enum contains: `Tops`, `Bottoms`, `Dresses`, `Outerwear`, `Shoes`, `Bags`, `Accessories`.
 3. **Storage Bucket Configuration:**
    - In Supabase Dashboard -> **Storage** -> **Buckets**, confirm bucket `wardrobe` is created and toggled to **Public**.
@@ -300,18 +422,15 @@ For any developer or agent running this repository on a fresh Supabase project:
 
 The following tasks are prioritized for the next development sprints:
 
-### Sprint 1: ShareDrobe Circles Engine (Phase 2 MVP)
-- **Database Schema for Circles:**
-  - Create table `public.circles` (`id`, `name`, `creator_id`, `created_at`).
-  - Create table `public.circle_members` (`circle_id`, `user_id`, `role`, `joined_at`).
-  - Create table `public.circle_items` (`circle_id`, `item_id`, `is_available`, `status`).
-- **Circle RLS Policies:**
-  - Allow users to view items shared into circles where `auth.uid()` is an active member in `circle_members`.
-- **UI Implementation (`src/app/sharedrobe/`):**
-  - Replace Coming Soon placeholder with functional circle directories:
-    - Circle creation modal ("Add Group").
-    - Circle invitation modal ("Add Friend" by email/handle).
-    - Grid view of garments shared inside each circle with borrow request action.
+### Sprint 1: ShareDrobe Circles Engine (Phase 2 MVP) — [COMPLETED]
+- **Delivered in Phase 2 (`feat/phase2-friends-and-circles`):**
+  - Database schema & idempotent backfill in `supabase/migrations/20261016000000_phase2_social.sql`.
+  - Anti-recursion security definer functions for safe circle member evaluation.
+  - Circle-aware RLS policy on `public.items`.
+  - Resend transactional email integration with Stitch HTML styling.
+  - 3-tab Community Hub UI in `src/app/sharedrobe/` (My Circles, My Friends, Real-Time Fuzzy Search, Pending Requests banner).
+  - Garment sharing modal (`ShareItemModal.tsx`) with circle checklist and batch sharing.
+  - 13 automated social edge case tests in `scripts/test-social-actions-edge-cases.mjs` (27 total tests across project).
 
 ### Sprint 2: Wardrobe Item Management & Item Detail View
 - **Item Detail Screen (`/items/[id]`):**
