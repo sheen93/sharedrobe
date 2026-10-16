@@ -573,3 +573,176 @@ export async function respondToCircleMemberRequest(
     return { success: true, message: "Member request declined." };
   }
 }
+
+export interface SocialSearchResult {
+  profiles: Array<{
+    id: string;
+    fullName: string;
+    email: string;
+    friendshipStatus: "none" | "pending_sent" | "pending_received" | "accepted";
+    friendshipId?: string;
+  }>;
+  circles: Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    memberCount: number;
+    membershipStatus: "none" | "pending" | "approved";
+  }>;
+}
+
+/**
+ * Real-time fuzzy search across member profiles and sharing circles.
+ * Includes user relationship status (friendship / circle membership) for each hit.
+ */
+export async function searchSocial(
+  query: string
+): Promise<ActionResult<SocialSearchResult>> {
+  const trimmed = typeof query === "string" ? query.trim() : "";
+  if (trimmed.length < 2) {
+    return {
+      success: true,
+      message: "Search query too short",
+      data: { profiles: [], circles: [] },
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "Authentication required to search." };
+  }
+
+  const sanitizedQuery = trimmed.replace(/[%_]/g, "");
+
+  // 1. Search profiles (exclude current user)
+  const { data: matchedProfiles, error: profileErr } = await supabase
+    .from("profiles")
+    .select("id, full_name, email")
+    .neq("id", user.id)
+    .or(`full_name.ilike.%${sanitizedQuery}%,email.ilike.%${sanitizedQuery}%`)
+    .limit(10);
+
+  if (profileErr) {
+    console.error("[SearchSocial] Profile search error:", profileErr);
+  }
+
+  const profileIds = matchedProfiles?.map((p) => p.id) || [];
+  let userFriendships: Array<{
+    id: string;
+    requester_id: string;
+    addressee_id: string;
+    status: string;
+  }> = [];
+
+  if (profileIds.length > 0) {
+    const { data: friendships } = await supabase
+      .from("friendships")
+      .select("id, requester_id, addressee_id, status")
+      .or(
+        `and(requester_id.eq.${user.id},addressee_id.in.(${profileIds.join(",")})),and(addressee_id.eq.${user.id},requester_id.in.(${profileIds.join(",")}))`
+      );
+    if (friendships) {
+      userFriendships = friendships;
+    }
+  }
+
+  const enrichedProfiles = (matchedProfiles || []).map((p) => {
+    const match = userFriendships.find(
+      (f) =>
+        (f.requester_id === user.id && f.addressee_id === p.id) ||
+        (f.addressee_id === user.id && f.requester_id === p.id)
+    );
+
+    let friendshipStatus: "none" | "pending_sent" | "pending_received" | "accepted" =
+      "none";
+    if (match) {
+      if (match.status === "accepted") {
+        friendshipStatus = "accepted";
+      } else if (match.requester_id === user.id) {
+        friendshipStatus = "pending_sent";
+      } else {
+        friendshipStatus = "pending_received";
+      }
+    }
+
+    return {
+      id: p.id,
+      fullName: p.full_name || "Drobe Member",
+      email: p.email,
+      friendshipStatus,
+      friendshipId: match?.id,
+    };
+  });
+
+  // 2. Search circles
+  const { data: matchedCircles, error: circleErr } = await supabase
+    .from("circles")
+    .select("id, name, description, created_by, created_at")
+    .ilike("name", `%${sanitizedQuery}%`)
+    .limit(10);
+
+  if (circleErr) {
+    console.error("[SearchSocial] Circle search error:", circleErr);
+  }
+
+  const circleIds = matchedCircles?.map((c) => c.id) || [];
+  let circleMemberships: Array<{ circle_id: string; status: string; role: string }> =
+    [];
+  let allMembersCount: Array<{ circle_id: string }> = [];
+
+  if (circleIds.length > 0) {
+    const { data: myMemberships } = await supabase
+      .from("circle_members")
+      .select("circle_id, status, role")
+      .eq("user_id", user.id)
+      .in("circle_id", circleIds);
+    if (myMemberships) {
+      circleMemberships = myMemberships;
+    }
+
+    const { data: counts } = await supabase
+      .from("circle_members")
+      .select("circle_id")
+      .in("circle_id", circleIds)
+      .eq("status", "approved");
+    if (counts) {
+      allMembersCount = counts;
+    }
+  }
+
+  const enrichedCircles = (matchedCircles || []).map((c) => {
+    const myMem = circleMemberships.find((m) => m.circle_id === c.id);
+    let membershipStatus: "none" | "pending" | "approved" = "none";
+    if (myMem) {
+      if (myMem.status === "approved") {
+        membershipStatus = "approved";
+      } else if (myMem.status === "pending") {
+        membershipStatus = "pending";
+      }
+    }
+
+    const memberCount = allMembersCount.filter((m) => m.circle_id === c.id).length;
+
+    return {
+      id: c.id,
+      name: c.name,
+      description: c.description,
+      memberCount: Math.max(memberCount, 1),
+      membershipStatus,
+    };
+  });
+
+  return {
+    success: true,
+    message: "Search completed",
+    data: {
+      profiles: enrichedProfiles,
+      circles: enrichedCircles,
+    },
+  };
+}
+

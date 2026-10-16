@@ -1,135 +1,252 @@
-"use client";
+import { redirect } from "next/navigation";
+import { createClient } from "@/utils/supabase/server";
+import SharedrobeClient, {
+  type UserCircleData,
+  type UserFriendData,
+  type PendingFriendRequestData,
+  type OutgoingFriendRequestData,
+  type PendingCircleRequestData,
+  type CircleItemPreview,
+} from "./SharedrobeClient";
 
-import React from "react";
-import { Share2, Plus, Sparkles, FolderArchive, ChevronRight } from "lucide-react";
-import ScreenHeader from "@/components/ui/ScreenHeader";
-import InfoBar from "@/components/ui/InfoBar";
-import BottomNav from "@/components/BottomNav";
+export const dynamic = "force-dynamic";
 
-const PREVIEW_CIRCLES = [
-  {
-    name: "College Roommates",
-    members: "4 Members • Maya, Emma, Zoe & You",
-    count: "24 items",
-    active: true,
-  },
-  {
-    name: "Weekend Gala Circle",
-    members: "6 Members • Formal dresses & coats",
-    count: "18 items",
-    active: false,
-  },
-  {
-    name: "Brooklyn Fashion Swap",
-    members: "12 Members • Local neighborhood",
-    count: "41 items",
-    active: false,
-  },
-  {
-    name: "Work Besties Collective",
-    members: "3 Members • Office wear & blazers",
-    count: "15 items",
-    active: false,
-  },
-];
+interface DbMembershipRow {
+  id: string;
+  circle_id: string;
+  role: string;
+  status: string;
+  created_at: string;
+  circle: {
+    id: string;
+    name: string;
+    description: string | null;
+    created_by: string;
+    created_at: string;
+  } | null;
+}
 
-export default function ShareDrobePage() {
-  return (
-    <div className="flex min-h-dvh flex-col items-center bg-linen sm:py-6">
-      {/* Responsive App Shell: Full-width on mobile devices, centered card on desktops */}
-      <main className="flex w-full max-w-md flex-1 flex-col bg-buttercream p-4 pb-28 sm:rounded-[32px] sm:border sm:border-border-neutral sm:p-5 sm:shadow-2xl">
-        {/* Screen Header matching Stitch Screen 2 */}
-        <ScreenHeader
-          meta="CIRCULATION // SHARED"
-          title="ShareDrobe"
-          action={
-            <button
-              type="button"
-              className="flex h-10 w-10 items-center justify-center rounded-xl bg-dusty-lilac text-white shadow-md transition active:scale-95"
-              title="Add Options (Coming Soon)"
-            >
-              <Plus className="h-5 w-5 stroke-[2.5]" />
-            </button>
+interface DbFriendshipRow {
+  id: string;
+  requester_id: string;
+  addressee_id: string;
+  status: string;
+  created_at: string;
+  requester: { id: string; full_name: string | null; email: string } | null;
+  addressee: { id: string; full_name: string | null; email: string } | null;
+}
+
+interface DbCircleRequestRow {
+  id: string;
+  circle_id: string;
+  user_id: string;
+  status: string;
+  created_at: string;
+  circle: { id: string; name: string } | null;
+  profile: { id: string; full_name: string | null; email: string } | null;
+}
+
+export default async function ShareDrobePage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  // 1. Fetch user's circles & memberships
+  const { data: userMemberships } = await supabase
+    .from("circle_members")
+    .select(`
+      id,
+      circle_id,
+      role,
+      status,
+      created_at,
+      circle:circle_id (
+        id,
+        name,
+        description,
+        created_by,
+        created_at
+      )
+    `)
+    .eq("user_id", user.id);
+
+  const memberships = (userMemberships as unknown as DbMembershipRow[]) || [];
+  const circleIds = memberships.map((m) => m.circle_id);
+
+  // 2. Fetch member counts for these circles
+  let memberCounts: Record<string, number> = {};
+  if (circleIds.length > 0) {
+    const { data: memberRows } = await supabase
+      .from("circle_members")
+      .select("circle_id")
+      .in("circle_id", circleIds)
+      .eq("status", "approved");
+
+    if (memberRows) {
+      memberCounts = memberRows.reduce<Record<string, number>>((acc, row) => {
+        acc[row.circle_id] = (acc[row.circle_id] || 0) + 1;
+        return acc;
+      }, {});
+    }
+  }
+
+  // 3. Fetch shared items in these circles
+  let circleItemsMap: Record<string, CircleItemPreview[]> = {};
+
+  if (circleIds.length > 0) {
+    const { data: circleItemRows } = await supabase
+      .from("circle_items")
+      .select(`
+        id,
+        circle_id,
+        item_id,
+        shared_by,
+        items:item_id (
+          id,
+          title,
+          category,
+          image_url,
+          owner_id
+        )
+      `)
+      .in("circle_id", circleIds);
+
+    if (circleItemRows) {
+      circleItemsMap = circleItemRows.reduce<Record<string, CircleItemPreview[]>>(
+        (acc, row) => {
+          if (!acc[row.circle_id]) acc[row.circle_id] = [];
+          if (row.items && !Array.isArray(row.items)) {
+            acc[row.circle_id].push(row.items as unknown as CircleItemPreview);
           }
-        />
+          return acc;
+        },
+        {}
+      );
+    }
+  }
 
-        {/* Info strip */}
-        <InfoBar
-          icon={Share2}
-          label="Connected Sharing Circles"
-          detail="Coming Soon"
-          iconClassName="text-french-navy"
-          className="mt-3"
-        />
+  // Format initial circles
+  const initialCircles: UserCircleData[] = memberships
+    .filter((m): m is DbMembershipRow & { circle: NonNullable<DbMembershipRow["circle"]> } =>
+      Boolean(m.circle)
+    )
+    .map((m) => ({
+      id: m.circle.id,
+      name: m.circle.name,
+      description: m.circle.description,
+      role: m.role as "admin" | "member",
+      status: m.status as "approved" | "pending",
+      memberCount: memberCounts[m.circle.id] || 1,
+      sharedItemCount: (circleItemsMap[m.circle.id] || []).length,
+      items: circleItemsMap[m.circle.id] || [],
+    }));
 
-        {/* Feature Announcement / Coming Soon Card */}
-        <div className="mt-4 rounded-2xl border border-dusty-lilac/30 bg-dusty-lilac/10 p-4 text-french-navy">
-          <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-dusty-lilac text-white shadow-xs">
-              <Sparkles className="h-4 w-4" />
-            </span>
-            <div>
-              <h3 className="text-xs font-bold uppercase tracking-wider">
-                Circles In Development
-              </h3>
-              <p className="text-[11px] text-muted">
-                Feature Milestone: Phase 2
-              </p>
-            </div>
-          </div>
-          <p className="mt-2 text-xs leading-relaxed text-midnight-slate">
-            Share closets with friends, roommates, and style circles. Borrow and lend garments friction-free directly through circular wardrobe directories.
-          </p>
-        </div>
+  // 4. Fetch friendships
+  const { data: friendshipsData } = await supabase
+    .from("friendships")
+    .select(`
+      id,
+      requester_id,
+      addressee_id,
+      status,
+      created_at,
+      requester:requester_id (id, full_name, email),
+      addressee:addressee_id (id, full_name, email)
+    `)
+    .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`);
 
-        {/* Preview Circles from Stitch mockup */}
-        <div className="mt-4 space-y-2.5">
-          <div className="flex items-center justify-between px-1">
-            <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted">
-              PREVIEW DIRECTORIES
-            </span>
-            <span className="font-mono text-[10px] text-dusty-lilac">
-              4 Mock Circles
-            </span>
-          </div>
+  const friendships = (friendshipsData as unknown as DbFriendshipRow[]) || [];
 
-          {PREVIEW_CIRCLES.map((circle) => (
-            <div
-              key={circle.name}
-              className="group flex items-center justify-between rounded-2xl border border-border-neutral bg-chalk p-3.5 shadow-xs transition hover:border-dusty-lilac"
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border-strong bg-buttercream text-french-navy transition group-hover:bg-french-navy group-hover:text-white">
-                  <FolderArchive className="h-5 w-5 fill-current/20" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <h4 className="text-sm font-bold text-midnight-slate">
-                      {circle.name}
-                    </h4>
-                    {circle.active && (
-                      <span
-                        className="h-1.5 w-1.5 rounded-full bg-emerald-500"
-                        title="Active circle"
-                      />
-                    )}
-                  </div>
-                  <p className="text-[11px] text-muted">{circle.members}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="rounded-md border border-border-neutral bg-buttercream px-2 py-0.5 font-mono text-[11px] font-medium text-french-navy">
-                  {circle.count}
-                </span>
-                <ChevronRight className="h-4 w-4 text-muted transition group-hover:translate-x-0.5" />
-              </div>
-            </div>
-          ))}
-        </div>
-      </main>
+  const initialFriends: UserFriendData[] = [];
+  const initialIncomingFriendRequests: PendingFriendRequestData[] = [];
+  const initialOutgoingFriendRequests: OutgoingFriendRequestData[] = [];
 
-      {/* Persistent Bottom Nav with ShareDrobe active */}
-      <BottomNav />
-    </div>
+  friendships.forEach((f) => {
+    if (f.status === "accepted") {
+      const isRequester = f.requester_id === user.id;
+      const other = isRequester ? f.addressee : f.requester;
+      if (other) {
+        initialFriends.push({
+          id: other.id,
+          friendshipId: f.id,
+          fullName: other.full_name || "Drobe Member",
+          email: other.email,
+          createdAt: f.created_at,
+        });
+      }
+    } else if (f.status === "pending") {
+      if (f.addressee_id === user.id && f.requester) {
+        initialIncomingFriendRequests.push({
+          friendshipId: f.id,
+          requesterId: f.requester.id,
+          fullName: f.requester.full_name || "Drobe Member",
+          email: f.requester.email,
+          createdAt: f.created_at,
+        });
+      } else if (f.requester_id === user.id && f.addressee) {
+        initialOutgoingFriendRequests.push({
+          friendshipId: f.id,
+          addresseeId: f.addressee.id,
+          fullName: f.addressee.full_name || "Drobe Member",
+          email: f.addressee.email,
+          createdAt: f.created_at,
+        });
+      }
+    }
+  });
+
+  // 5. Fetch incoming circle member requests (for circles where current user is an admin)
+  const adminCircleIds = memberships
+    .filter((m) => m.role === "admin" && m.status === "approved")
+    .map((m) => m.circle_id);
+
+  const initialIncomingCircleRequests: PendingCircleRequestData[] = [];
+  if (adminCircleIds.length > 0) {
+    const { data: memberRequestsData } = await supabase
+      .from("circle_members")
+      .select(`
+        id,
+        circle_id,
+        user_id,
+        status,
+        created_at,
+        circle:circle_id (id, name),
+        profile:user_id (id, full_name, email)
+      `)
+      .in("circle_id", adminCircleIds)
+      .eq("status", "pending")
+      .neq("user_id", user.id);
+
+    const memberRequests =
+      (memberRequestsData as unknown as DbCircleRequestRow[]) || [];
+
+    memberRequests.forEach((r) => {
+      if (r.circle && r.profile) {
+        initialIncomingCircleRequests.push({
+          membershipId: r.id,
+          circleId: r.circle.id,
+          circleName: r.circle.name,
+          requesterId: r.profile.id,
+          fullName: r.profile.full_name || "Drobe Member",
+          email: r.profile.email,
+          createdAt: r.created_at,
+        });
+      }
+    });
+  }
+
+  return (
+    <SharedrobeClient
+      initialCircles={initialCircles}
+      initialFriends={initialFriends}
+      initialIncomingFriendRequests={initialIncomingFriendRequests}
+      initialOutgoingFriendRequests={initialOutgoingFriendRequests}
+      initialIncomingCircleRequests={initialIncomingCircleRequests}
+    />
   );
 }
