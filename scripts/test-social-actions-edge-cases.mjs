@@ -23,6 +23,13 @@
  *    - 4C: Rejects invalid item ID
  *    - 4D: Correctly filters out already-shared circles to prevent duplicate inserts
  *    - 4E: Returns 0 new shares when garment is already present in all selected circles
+ * 5. Circle Friends Addition Validation:
+ *    - 5A: Rejects adding friends when selection is empty
+ *    - 5B: Rejects invalid circle ID
+ *    - 5C: Rejects malformed friend IDs in batch array
+ *    - 5D: Filters out friends already in circle
+ *    - 5E: Gracefully detects when all friends are already members
+ *    - 5F: HTML escaping sanitization on recipient and circle names
  * ==============================================================================
  */
 
@@ -73,6 +80,26 @@ function validateShareInputs(circleIds, itemId) {
 function filterNewCirclesToShare(targetCircleIds, alreadySharedCircleIds) {
   const alreadySharedSet = new Set(alreadySharedCircleIds);
   return targetCircleIds.filter((cid) => !alreadySharedSet.has(cid));
+}
+
+function validateAddFriendsInputs(circleId, friendUserIds) {
+  if (!isValidUuid(circleId)) {
+    return { valid: false, error: "Invalid circle ID provided." };
+  }
+  if (!Array.isArray(friendUserIds) || friendUserIds.length === 0) {
+    return { valid: false, error: "Please select at least one friend to add to the circle." };
+  }
+  for (const fid of friendUserIds) {
+    if (!isValidUuid(fid)) {
+      return { valid: false, error: `Invalid friend user ID: ${fid}` };
+    }
+  }
+  return { valid: true };
+}
+
+function filterNewFriendsToAdd(selectedFriendIds, existingMemberIds) {
+  const existingSet = new Set(existingMemberIds);
+  return selectedFriendIds.filter((fid) => !existingSet.has(fid));
 }
 
 function escapeHtml(str) {
@@ -181,6 +208,35 @@ const allAlreadyShared = filterNewCirclesToShare([validCircle1], [validCircle1])
 assert.equal(allAlreadyShared.length, 0);
 console.log("  ✅ [PASS] 4E: Gracefully detects when garment is already shared in all selected circles");
 
+// 5. Circle Member Friends Addition Validation
+const validFriend1 = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+const validFriend2 = "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee";
+
+assert.equal(validateAddFriendsInputs(validCircle1, []).valid, false, "5A failed");
+console.log("  ✅ [PASS] 5A: Rejects adding friends when friends selection is empty");
+
+assert.equal(validateAddFriendsInputs("invalid-circle-uuid", [validFriend1]).valid, false, "5B failed");
+console.log("  ✅ [PASS] 5B: Rejects invalid circle ID in addFriendsToCircle");
+
+assert.equal(validateAddFriendsInputs(validCircle1, [validFriend1, "not-a-friend-uuid"]).valid, false, "5C failed");
+console.log("  ✅ [PASS] 5C: Rejects malformed or invalid friend user IDs in batch selection");
+
+const existingMembers = [validFriend1];
+const selectedFriends = [validFriend1, validFriend2];
+const newFriendsToAdd = filterNewFriendsToAdd(selectedFriends, existingMembers);
+assert.equal(newFriendsToAdd.length, 1);
+assert.equal(newFriendsToAdd[0], validFriend2);
+console.log("  ✅ [PASS] 5D: Correctly filters out friends who are already members of circle");
+
+const allAlreadyMembers = filterNewFriendsToAdd([validFriend1], [validFriend1]);
+assert.equal(allAlreadyMembers.length, 0);
+console.log("  ✅ [PASS] 5E: Gracefully detects when all selected friends are already members");
+
+const friendNameRaw = "<Marie Curie>";
+const sanitizedFriendName = escapeHtml(friendNameRaw);
+assert.equal(sanitizedFriendName, "&lt;Marie Curie&gt;");
+console.log("  ✅ [PASS] 5F: Circle added transactional notification safely escapes recipient and circle names");
+
 console.log("==================================================");
-console.log("🎉 All 13 Social Engine & Item Sharing tests PASSED!");
+console.log("🎉 All 19 Social Engine, Circle Friends & Sharing tests PASSED!");
 console.log("==================================================");

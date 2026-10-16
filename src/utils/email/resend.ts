@@ -179,6 +179,90 @@ export async function sendCircleJoinRequestEmail(
   }
 }
 
+export interface SendCircleAddedNotificationEmailParams {
+  friendEmail: string;
+  friendName: string;
+  circleName: string;
+  addedByName: string;
+  appUrl?: string;
+}
+
+/**
+ * Sends a clean, Stitch-styled transactional HTML email notifying a friend that they
+ * were added to a sharing circle by a circle admin.
+ */
+export async function sendCircleAddedNotificationEmail(
+  params: SendCircleAddedNotificationEmailParams
+): Promise<EmailSendResult> {
+  const client = getResendClient();
+  if (!client) {
+    console.warn(
+      "[Resend] RESEND_API_KEY is not configured. Circle member added email notification skipped."
+    );
+    return { success: false, skipped: true, error: "RESEND_API_KEY not configured" };
+  }
+
+  const {
+    friendEmail,
+    friendName,
+    circleName,
+    addedByName,
+    appUrl = "https://sharedrobe.app",
+  } = params;
+  const targetUrl = `${appUrl.replace(/\/$/, "")}/sharedrobe`;
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>You've been added to ${escapeHtml(circleName)}</title>
+</head>
+<body style="margin: 0; padding: 24px 16px; background-color: #FCFBF7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #121926;">
+  <div style="max-width: 460px; margin: 0 auto; background-color: #FFFFFF; border: 1px solid #E5E2D6; border-radius: 24px; padding: 32px 24px; box-shadow: 0 4px 16px rgba(29, 42, 68, 0.04);">
+    <div style="display: inline-block; background-color: #1D2A44; color: #FFFFFF; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 4px 10px; border-radius: 6px; margin-bottom: 16px;">
+      COMMUNITY // CIRCLE MEMBER
+    </div>
+    <h1 style="color: #121926; font-size: 20px; font-weight: 700; margin: 0 0 12px; line-height: 1.3;">
+      You're now in ${escapeHtml(circleName)}!
+    </h1>
+    <p style="color: #475467; font-size: 14px; line-height: 1.6; margin: 0 0 20px;">
+      Hi ${escapeHtml(friendName)}, <strong>${escapeHtml(addedByName)}</strong> added you to the sharing circle <strong>${escapeHtml(circleName)}</strong> on <strong>Share Drobe</strong>. You can now browse shared garments, lend wardrobe items, and borrow circular collections.
+    </p>
+    <div style="margin: 24px 0 16px;">
+      <a href="${escapeHtml(targetUrl)}" style="display: inline-block; background-color: #1D2A44; color: #FFFFFF; font-size: 13px; font-weight: 600; text-decoration: none; padding: 12px 24px; border-radius: 12px;">
+        Explore Circle Wardrobe →
+      </a>
+    </div>
+    <p style="color: #64748B; font-size: 12px; line-height: 1.5; margin: 24px 0 0; padding-top: 16px; border-top: 1px solid #F0EFE9;">
+      Manage your circles and shared wardrobe permissions anytime inside Share Drobe.
+    </p>
+  </div>
+</body>
+</html>
+  `.trim();
+
+  try {
+    const { data, error } = await client.emails.send({
+      from: DEFAULT_FROM,
+      to: [friendEmail],
+      subject: `You've been added to ${circleName} on Share Drobe`,
+      html,
+    });
+
+    if (error) {
+      console.warn("[Resend Error] Failed to send circle added email:", error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, id: data?.id };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown Resend error";
+    console.warn("[Resend Exception] Error sending circle added email:", message);
+    return { success: false, error: message };
+  }
+}
+
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g, "&amp;")

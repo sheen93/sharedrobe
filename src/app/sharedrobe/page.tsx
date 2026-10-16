@@ -78,20 +78,25 @@ export default async function ShareDrobePage() {
   const memberships = (userMemberships as unknown as DbMembershipRow[]) || [];
   const circleIds = memberships.map((m) => m.circle_id);
 
-  // 2. Fetch member counts for these circles
-  let memberCounts: Record<string, number> = {};
+  // 2. Fetch member counts and user IDs for these circles
+  const memberCounts: Record<string, number> = {};
+  const circleMembersMap: Record<string, string[]> = {};
   if (circleIds.length > 0) {
     const { data: memberRows } = await supabase
       .from("circle_members")
-      .select("circle_id")
-      .in("circle_id", circleIds)
-      .eq("status", "approved");
+      .select("circle_id, user_id, status")
+      .in("circle_id", circleIds);
 
     if (memberRows) {
-      memberCounts = memberRows.reduce<Record<string, number>>((acc, row) => {
-        acc[row.circle_id] = (acc[row.circle_id] || 0) + 1;
-        return acc;
-      }, {});
+      memberRows.forEach((row) => {
+        if (row.status === "approved") {
+          memberCounts[row.circle_id] = (memberCounts[row.circle_id] || 0) + 1;
+        }
+        if (!circleMembersMap[row.circle_id]) {
+          circleMembersMap[row.circle_id] = [];
+        }
+        circleMembersMap[row.circle_id].push(row.user_id);
+      });
     }
   }
 
@@ -144,6 +149,7 @@ export default async function ShareDrobePage() {
       memberCount: memberCounts[m.circle.id] || 1,
       sharedItemCount: (circleItemsMap[m.circle.id] || []).length,
       items: circleItemsMap[m.circle.id] || [],
+      memberUserIds: circleMembersMap[m.circle.id] || [],
     }));
 
   // 4. Fetch friendships

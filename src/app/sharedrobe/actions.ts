@@ -6,6 +6,7 @@ import { createClient } from "@/utils/supabase/server";
 import {
   sendFriendRequestEmail,
   sendCircleJoinRequestEmail,
+  sendCircleAddedNotificationEmail,
 } from "@/utils/email/resend";
 
 export type ActionResult<T = unknown> =
@@ -958,4 +959,300 @@ export async function searchSocial(
     },
   };
 }
+
+export interface CircleFriendCandidate {
+  id: string; // friend's profile ID
+  fullName: string;
+  email: string;
+  isAlreadyMember: boolean;
+  isPending: boolean;
+}
+
+/**
+ * Fetches all connected friends for the authenticated user and flags whether
+ * each friend is already a member (approved or pending) of the specified circle.
+ */
+export async function getCircleFriendsStatus(
+  circleId: string
+): Promise<ActionResult<CircleFriendCandidate[]>> {
+  if (!isValidUuid(circleId)) {
+    return { success: false, error: "Invalid circle ID provided." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "Authentication required." };
+  }
+
+  // 1. Fetch accepted friendships
+  const { data: friendshipsData, error: friendErr } = await supabase
+    .from("friendships")
+    .select(`
+      id,
+      requester_id,
+      addressee_id,
+      status,
+      requester:requester_id (id, full_name, email),
+      addressee:addressee_id (id, full_name, email)
+    `)
+    .eq("status", "accepted")
+    .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`);
+
+  if (friendErr) {
+    return { success: false, error: friendErr.message };
+  }
+
+  interface FriendWithProfile {
+    id: string;
+    requester_id: string;
+    addressee_id: string;
+    requester: { id: string; full_name: string | null; email: string } | null;
+    addressee: { id: string; full_name: string | null; email: string } | null;
+  }
+
+  const friendships = (friendshipsData as unknown as FriendWithProfile[]) || [];
+  const friendsList: Array<{ id: string; fullName: string; email: string }> = [];
+
+  friendships.forEach((f) => {
+    const isRequester = f.requester_id === user.id;
+    const other = isRequester ? f.addressee : f.requester;
+    if (other && other.id) {
+      friendsList.push({
+        id: other.id,
+        fullName: other.full_name || "Drobe Member",
+        email: other.email,
+      });
+    }
+  });
+
+  if (friendsList.length === 0) {
+    return {
+      success: true,
+      message: "No connected friends found",
+      data: [],
+    };
+  }
+
+  const friendIds = friendsList.map((f) => f.id);
+
+  // 2. Fetch existing circle memberships for these friends in circleId
+  const { data: circleMembers, error: memErr } = await supabase
+    .from("circle_members")
+    .select("user_id, status")
+    .eq("circle_id", circleId)
+    .in("user_id", friendIds);
+
+  if (memErr) {
+    return { success: false, error: memErr.message };
+  }
+
+  const memberStatusMap = new Map<string, string>();
+  (circleMembers || []).forEach((m) => {
+    memberStatusMap.set(m.user_id, m.status);
+  });
+
+  const candidates: CircleFriendCandidate[] = friendsList.map((f) => {
+    const status = memberStatusMap.get(f.id);
+    return {
+      id: f.id,
+      fullName: f.fullName,
+      email: f.email,
+      isAlreadyMember: status === "approved",
+      isPending: status === "pending",
+    };
+  });
+
+  return {
+    success: true,
+    message: "Friends loaded",
+    data: candidates,
+  };
+}
+
+/**
+ * Adds one or more connected friends into a sharing circle.
+ * Validates:
+ * - circleId is valid UUID
+ * - friendUserIds is non-empty array of valid UUIDs
+ * - Authenticated session
+ * - Current user is an authorized admin or member of this circle (RLS enforces circle admin)
+ * - All target users are accepted friends of current user
+ * - Filters out friends who are already members of this circle (prevents duplicate key errors)
+ * - Inserts into circle_members with role: 'member', status: 'approved'
+ * - Dispatches transactional email notifications via Resend (defensive try/catch)
+ * - Revalidates /sharedrobe
+ */
+export async function addFriendsToCircle(
+  circleId: string,
+  friendUserIds: string[]
+): Promise<ActionResult<{ addedCount: number }>> {
+  if (!isValidUuid(circleId)) {
+    return { success: false, error: "Invalid circle ID provided." };
+  }
+  if (!Array.isArray(friendUserIds) || friendUserIds.length === 0) {
+    return {
+      success: false,
+      error: "Please select at least one friend to add to the circle.",
+    };
+  }
+  for (const fid of friendUserIds) {
+    if (!isValidUuid(fid)) {
+      return { success: false, error: `Invalid friend user ID: ${fid}` };
+    }
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "Authentication required to add members." };
+  }
+
+  // 1. Fetch circle details
+  const { data: circle, error: circleErr } = await supabase
+    .from("circles")
+    .select("id, name, created_by")
+    .eq("id", circleId)
+    .maybeSingle();
+
+  if (circleErr || !circle) {
+    return { success: false, error: "Circle could not be found." };
+  }
+
+  // 2. Verify current user is an approved admin of the circle
+  const { data: currentMember, error: memberErr } = await supabase
+    .from("circle_members")
+    .select("id, role, status")
+    .eq("circle_id", circleId)
+    .eq("user_id", user.id)
+    .eq("status", "approved")
+    .maybeSingle();
+
+  if (memberErr || !currentMember) {
+    return {
+      success: false,
+      error: "You must be an approved member of this circle to manage members.",
+    };
+  }
+
+  // 3. Verify all selected users are accepted friends of the current user
+  const { data: friendships, error: friendErr } = await supabase
+    .from("friendships")
+    .select("id, requester_id, addressee_id, status")
+    .eq("status", "accepted")
+    .or(
+      `and(requester_id.eq.${user.id},addressee_id.in.(${friendUserIds.join(",")})),and(addressee_id.eq.${user.id},requester_id.in.(${friendUserIds.join(",")}))`
+    );
+
+  if (friendErr) {
+    return { success: false, error: friendErr.message };
+  }
+
+  const verifiedFriendIds = new Set(
+    (friendships || []).map((f) =>
+      f.requester_id === user.id ? f.addressee_id : f.requester_id
+    )
+  );
+
+  const unauthorizedFriends = friendUserIds.filter(
+    (fid) => !verifiedFriendIds.has(fid)
+  );
+  if (unauthorizedFriends.length > 0) {
+    return {
+      success: false,
+      error: "You can only add users who are connected as accepted friends in your network.",
+    };
+  }
+
+  // 4. Check for existing circle memberships to avoid duplicates
+  const { data: existingMembers, error: existingErr } = await supabase
+    .from("circle_members")
+    .select("user_id, status")
+    .eq("circle_id", circleId)
+    .in("user_id", friendUserIds);
+
+  if (existingErr) {
+    return { success: false, error: existingErr.message };
+  }
+
+  const existingMemberIdSet = new Set(
+    (existingMembers || []).map((m) => m.user_id)
+  );
+  const newFriendIds = friendUserIds.filter(
+    (fid) => !existingMemberIdSet.has(fid)
+  );
+
+  if (newFriendIds.length === 0) {
+    return {
+      success: true,
+      message: "All selected friends are already members of this circle.",
+      data: { addedCount: 0 },
+    };
+  }
+
+  // 5. Insert new members into circle_members
+  const rowsToInsert = newFriendIds.map((friendId) => ({
+    circle_id: circleId,
+    user_id: friendId,
+    role: "member",
+    status: "approved",
+  }));
+
+  const { error: insertErr } = await supabase
+    .from("circle_members")
+    .insert(rowsToInsert);
+
+  if (insertErr) {
+    return {
+      success: false,
+      error: insertErr.message || "Failed to add friends to circle.",
+    };
+  }
+
+  // 6. Send transactional email notifications to newly added friends
+  try {
+    const { data: friendProfiles } = await supabase
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", newFriendIds);
+
+    if (friendProfiles && friendProfiles.length > 0) {
+      const origin = await getRequestOrigin();
+      const addedByName =
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        "A friend on Share Drobe";
+
+      await Promise.allSettled(
+        friendProfiles.map((fp) =>
+          sendCircleAddedNotificationEmail({
+            friendEmail: fp.email,
+            friendName: fp.full_name || "Friend",
+            circleName: circle.name,
+            addedByName,
+            appUrl: origin,
+          })
+        )
+      );
+    }
+  } catch (err) {
+    console.warn("[AddFriendsToCircle] Non-fatal notification error:", err);
+  }
+
+  revalidatePath("/sharedrobe");
+  return {
+    success: true,
+    message: `Successfully added ${newFriendIds.length} ${
+      newFriendIds.length === 1 ? "friend" : "friends"
+    } to "${circle.name}"!`,
+    data: { addedCount: newFriendIds.length },
+  };
+}
+
 

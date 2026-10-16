@@ -22,6 +22,7 @@ import ScreenHeader from "@/components/ui/ScreenHeader";
 import InfoBar from "@/components/ui/InfoBar";
 import BottomNav from "@/components/BottomNav";
 import CreateCircleModal from "@/components/CreateCircleModal";
+import AddFriendsToCircleModal from "@/components/AddFriendsToCircleModal";
 import { cn } from "@/utils/cn";
 import {
   sendFriendRequest,
@@ -49,6 +50,7 @@ export interface UserCircleData {
   memberCount: number;
   sharedItemCount: number;
   items?: CircleItemPreview[];
+  memberUserIds?: string[];
 }
 
 export interface UserFriendData {
@@ -103,6 +105,7 @@ export default function SharedrobeClient({
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"circles" | "friends" | "search">("circles");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [addFriendsModalCircle, setAddFriendsModalCircle] = useState<UserCircleData | null>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -585,7 +588,20 @@ export default function SharedrobeClient({
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0 ml-2">
+                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAddFriendsModalCircle(circle);
+                            }}
+                            className="flex items-center gap-1 rounded-lg border border-border-neutral bg-buttercream px-2 py-1 text-[10px] font-bold text-french-navy transition hover:bg-french-navy hover:text-white shadow-2xs active:scale-95"
+                            title="Add friends to this circle"
+                          >
+                            <UserPlus size={11} strokeWidth={2.5} />
+                            <span className="hidden sm:inline">Add Friends</span>
+                          </button>
+
                           <span className="rounded-md border border-border-neutral bg-buttercream px-2 py-0.5 font-mono text-[11px] font-medium text-french-navy">
                             {circle.memberCount}{" "}
                             {circle.memberCount === 1 ? "Member" : "Members"}
@@ -602,6 +618,24 @@ export default function SharedrobeClient({
                       {/* Expandable shared garments preview in this circle */}
                       {isExpanded && (
                         <div className="border-t border-border-neutral/60 bg-buttercream/50 p-3.5 animate-in fade-in duration-150">
+                          {/* Circle Member Management Bar */}
+                          <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-border-neutral/60">
+                            <div className="flex items-center gap-1.5">
+                              <Users size={12} className="text-dusty-lilac" />
+                              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted">
+                                CIRCLE MEMBERS ({circle.memberCount})
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setAddFriendsModalCircle(circle)}
+                              className="flex items-center gap-1 rounded-lg bg-french-navy px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-french-navy-hover active:scale-95 shadow-xs"
+                            >
+                              <UserPlus size={11} strokeWidth={2.5} />
+                              <span>+ Add Friends to Circle</span>
+                            </button>
+                          </div>
+
                           <div className="flex items-center justify-between mb-2">
                             <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted">
                               SHARED GARMENTS ({circleItems.length})
@@ -1013,6 +1047,24 @@ export default function SharedrobeClient({
           showFeedback("success", "Circle created successfully!");
           router.refresh();
         }}
+      />
+
+      {/* Add Friends to Circle Modal */}
+      <AddFriendsToCircleModal
+        circle={addFriendsModalCircle}
+        friends={initialFriends}
+        isOpen={Boolean(addFriendsModalCircle)}
+        onClose={() => setAddFriendsModalCircle(null)}
+        onSuccess={(addedCount, circleName) => {
+          showFeedback(
+            "success",
+            `Successfully added ${addedCount} ${
+              addedCount === 1 ? "friend" : "friends"
+            } to "${circleName}"!`
+          );
+          router.refresh();
+        }}
+        onSwitchToSearch={() => setActiveTab("search")}
       />
     </div>
   );
