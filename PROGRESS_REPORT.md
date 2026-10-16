@@ -2,8 +2,8 @@
 
 > **Document Type:** Multi-Agent System Handoff & System State Blueprint  
 > **Repository:** `sheen93/sharedrobe`  
-> **Last Updated:** October 15, 2026 (Local Time: 22:15 EDT)  
-> **Current Stable Commit on `main`:** `0afeac2`  
+> **Last Updated:** October 15, 2026 (Local Time: 22:56 EDT)  
+> **Current Stable Commit on `main`:** `4829c05`  
 > **Active Environment:** Next.js 16.3.5 (App Router, Turbopack) / React 19 / TypeScript 5 / Tailwind CSS v4 / Supabase (@supabase/ssr)
 
 ---
@@ -163,7 +163,7 @@ sharedrobe/
 │       │   └── validation.ts       # Pure validators for sign in, sign up, profile, passwords
 │       ├── cn.ts                   # Tailwind class merge utility (clsx + twMerge)
 │       ├── supabase/
-│       │   ├── client.ts           # Browser Supabase client (Client Components)
+│       │   ├── client.ts           # Singleton browser Supabase client (prevents mobile navigator.locks deadlock)
 │       │   ├── env.ts              # Strongly-typed environment variable validator
 │       │   ├── proxy.ts            # Proxy session refresher & redirect engine
 │       │   └── server.ts           # SSR Supabase client using Next.js 16 async cookies()
@@ -172,7 +172,7 @@ sharedrobe/
 │   └── migrations/
 │       ├── 20261012000000_auth_owner_rls.sql     # Baseline owner_id column & RLS setup
 │       └── 20261012000001_rls_insert_policy.sql  # Strict RLS (auth.uid() = owner_id) & Storage policies
-├── next.config.ts                  # Allowed dev origins for mobile LAN debugging
+├── next.config.ts                  # Allowed dev origins (192.168.1.153, 192.168.*.*, etc.) for mobile LAN dev
 ├── package.json                    # Scripts & dependencies
 └── tsconfig.json                   # Strict TypeScript compiler options
 ```
@@ -288,8 +288,11 @@ For any developer or agent running this repository on a fresh Supabase project:
    - In Supabase Dashboard -> **Storage** -> **Buckets**, confirm bucket `wardrobe` is created and toggled to **Public**.
 4. **Authentication Settings:**
    - Ensure **Email** provider is enabled.
-   - Set Site URL to `http://localhost:3000` (or `http://192.168.1.52:3000`).
-   - Add Redirect URLs: `http://localhost:3000/auth/confirm` and `http://192.168.1.52:3000/auth/confirm`.
+   - Set Site URL to `http://localhost:3000` (or `http://192.168.1.153:3000`).
+   - Add Redirect URLs:
+     - `http://localhost:3000/auth/confirm`
+     - `http://192.168.1.153:3000/auth/confirm`
+     - `http://192.168.1.52:3000/auth/confirm`
 
 ---
 
@@ -319,3 +322,30 @@ The following tasks are prioritized for the next development sprints:
 ### Sprint 3: Lookbook Builder ("Fav Outfit")
 - **Fav Outfit Feature:**
   - Multi-item pairing engine linking a `Top` and `Bottom` (or `Dress` + `Accessories`) into a curated lookbook card matching the Dusty Lilac folder styling in the Stitch mockups.
+
+---
+
+## 9. Multi-Agent System Onboarding & Quick-Start Cheatsheet
+
+For any multi-agent system or incoming developer continuing development on Share Drobe:
+
+### 9.1 Required Agent Roles & Governance
+- **Lead Architect:** Adhere strictly to the Next.js 16 App Router architecture (`src/proxy.ts`, Server Components for initial fetches, Server Actions for mutations).
+- **Frontend Engineer:** Maintain the Google Stitch design tokens in `src/app/globals.css` (`Buttercream`, `Chalk`, `French Navy`, `Dusty Lilac`, `Midnight Slate`). All mobile screens must use full-bleed responsive cards with `sm:` desktop framing.
+- **QA Advocate:** Every new feature or refactor must be accompanied by edge-case test coverage in `scripts/test-upload-edge-cases.mjs` or dedicated test scripts.
+
+### 9.2 Development Commands
+```bash
+# Start dev server bound to LAN (accessible via desktop and mobile Wi-Fi)
+npm run dev -- -H 0.0.0.0
+
+# Run full pre-PR validation gate (must pass with 0 errors before any commit/merge)
+npm run lint && npm run typecheck && npm test && npm run build
+```
+
+### 9.3 Key Architectural Guardrails
+1. **Never use singular category strings:** The Postgres ENUM `item_category` is strictly plural (`Tops`, `Bottoms`, `Dresses`, `Outerwear`, `Shoes`, `Bags`, `Accessories`). Any insert with a singular string will be rejected with code `22P02`.
+2. **Never instantiate `createBrowserClient` unbound inside client components:** Always import `createClient` from `@/utils/supabase/client` which provides the singleton instance. Re-instantiating `createBrowserClient` causes `navigator.locks` contention and deadlocks auth requests on mobile browsers.
+3. **Always fetch initial data in Server Components:** In Next.js 16, prefer async Server Components with `@/utils/supabase/server` for initial data queries, and pass preloaded items down to interactive client components to guarantee instant hydration without loading spinners.
+4. **Preserve RLS Integrity:** Every insert into `public.items` must explicitly include `owner_id: user.id`. The active RLS policies strictly enforce `auth.uid() = owner_id`.
+
