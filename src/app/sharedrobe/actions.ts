@@ -496,6 +496,219 @@ export async function shareItemToCircle(
   };
 }
 
+export interface CircleShareOption {
+  id: string;
+  name: string;
+  description: string | null;
+  role: "admin" | "member";
+  memberCount: number;
+  isAlreadyShared: boolean;
+}
+
+interface DbMembershipWithCircle {
+  circle_id: string;
+  role: string;
+  circles: {
+    id: string;
+    name: string;
+    description: string | null;
+  } | null;
+}
+
+/**
+ * Fetches all circles where the authenticated user is an approved member,
+ * along with an indicator of whether a specific item is already shared in each circle.
+ */
+export async function getUserApprovedCirclesForItem(
+  itemId: string
+): Promise<ActionResult<CircleShareOption[]>> {
+  if (!isValidUuid(itemId)) {
+    return { success: false, error: "Invalid item ID provided." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "Authentication required." };
+  }
+
+  // 1. Fetch user's approved circle memberships
+  const { data: membershipsData, error: memErr } = await supabase
+    .from("circle_members")
+    .select(`
+      circle_id,
+      role,
+      circles:circle_id (
+        id,
+        name,
+        description
+      )
+    `)
+    .eq("user_id", user.id)
+    .eq("status", "approved");
+
+  if (memErr) {
+    return { success: false, error: memErr.message };
+  }
+
+  const memberships = (membershipsData as unknown as DbMembershipWithCircle[]) || [];
+  const circleIds = memberships.map((m) => m.circle_id);
+
+  if (circleIds.length === 0) {
+    return {
+      success: true,
+      message: "No approved circles found",
+      data: [],
+    };
+  }
+
+  // 2. Fetch existing circle shares for this item
+  const { data: existingShares } = await supabase
+    .from("circle_items")
+    .select("circle_id")
+    .eq("item_id", itemId)
+    .in("circle_id", circleIds);
+
+  const sharedCircleIdSet = new Set((existingShares || []).map((s) => s.circle_id));
+
+  // 3. Fetch member counts for these circles
+  const { data: memberCounts } = await supabase
+    .from("circle_members")
+    .select("circle_id")
+    .in("circle_id", circleIds)
+    .eq("status", "approved");
+
+  const countMap = (memberCounts || []).reduce<Record<string, number>>((acc, row) => {
+    acc[row.circle_id] = (acc[row.circle_id] || 0) + 1;
+    return acc;
+  }, {});
+
+  const options: CircleShareOption[] = memberships
+    .filter((m): m is DbMembershipWithCircle & { circles: NonNullable<DbMembershipWithCircle["circles"]> } =>
+      Boolean(m.circles)
+    )
+    .map((m) => ({
+      id: m.circles.id,
+      name: m.circles.name,
+      description: m.circles.description,
+      role: m.role as "admin" | "member",
+      memberCount: countMap[m.circle_id] || 1,
+      isAlreadyShared: sharedCircleIdSet.has(m.circle_id),
+    }));
+
+  return {
+    success: true,
+    message: "Circles loaded",
+    data: options,
+  };
+}
+
+/**
+ * Shares an item across multiple selected circles simultaneously.
+ */
+export async function shareItemToCircles(
+  circleIds: string[],
+  itemId: string
+): Promise<ActionResult<{ sharedCount: number }>> {
+  if (!isValidUuid(itemId)) {
+    return { success: false, error: "Invalid item ID provided." };
+  }
+  if (!Array.isArray(circleIds) || circleIds.length === 0) {
+    return { success: false, error: "Please select at least one circle to share with." };
+  }
+  for (const cid of circleIds) {
+    if (!isValidUuid(cid)) {
+      return { success: false, error: `Invalid circle ID: ${cid}` };
+    }
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "Authentication required to share garments." };
+  }
+
+  // Verify item ownership
+  const { data: item, error: itemErr } = await supabase
+    .from("items")
+    .select("id, title, owner_id")
+    .eq("id", itemId)
+    .eq("owner_id", user.id)
+    .maybeSingle();
+
+  if (itemErr || !item) {
+    return { success: false, error: "Garment not found or does not belong to your closet." };
+  }
+
+  // Verify user is approved member in all target circles
+  const { data: memberships, error: memErr } = await supabase
+    .from("circle_members")
+    .select("circle_id")
+    .eq("user_id", user.id)
+    .eq("status", "approved")
+    .in("circle_id", circleIds);
+
+  if (memErr) {
+    return { success: false, error: memErr.message };
+  }
+
+  const approvedSet = new Set((memberships || []).map((m) => m.circle_id));
+  const unauthorized = circleIds.filter((cid) => !approvedSet.has(cid));
+  if (unauthorized.length > 0) {
+    return {
+      success: false,
+      error: "You are not an approved member of all selected circles.",
+    };
+  }
+
+  // Filter out already-shared circles
+  const { data: existingShares } = await supabase
+    .from("circle_items")
+    .select("circle_id")
+    .eq("item_id", itemId)
+    .in("circle_id", circleIds);
+
+  const alreadySharedSet = new Set((existingShares || []).map((s) => s.circle_id));
+  const newCircleIds = circleIds.filter((cid) => !alreadySharedSet.has(cid));
+
+  if (newCircleIds.length === 0) {
+    return {
+      success: true,
+      message: `"${item.title}" is already shared to all selected circles.`,
+      data: { sharedCount: 0 },
+    };
+  }
+
+  // Insert into circle_items
+  const rowsToInsert = newCircleIds.map((cid) => ({
+    circle_id: cid,
+    item_id: itemId,
+    shared_by: user.id,
+  }));
+
+  const { error: insertErr } = await supabase
+    .from("circle_items")
+    .insert(rowsToInsert);
+
+  if (insertErr) {
+    return { success: false, error: insertErr.message };
+  }
+
+  revalidatePath("/sharedrobe");
+  revalidatePath("/");
+  return {
+    success: true,
+    message: `"${item.title}" successfully shared to ${newCircleIds.length} ${newCircleIds.length === 1 ? "circle" : "circles"}!`,
+    data: { sharedCount: newCircleIds.length },
+  };
+}
+
 /**
  * Circle Admin approves or rejects a pending circle member request.
  */

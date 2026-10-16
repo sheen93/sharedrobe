@@ -3,9 +3,10 @@
 import { useState, useTransition } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Plus, Database, Shirt, Tag, Sparkles } from "lucide-react";
+import { Plus, Database, Shirt, Tag, Sparkles, Share2, Check } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import AddItemModal from "@/components/AddItemModal";
+import ShareItemModal from "@/components/ShareItemModal";
 import ScreenHeader from "@/components/ui/ScreenHeader";
 import InfoBar from "@/components/ui/InfoBar";
 
@@ -28,6 +29,7 @@ export interface WardrobeItem {
   image_url: string;
   owner_id?: string;
   created_at?: string;
+  sharedCirclesCount?: number;
 }
 
 interface MyDrobeClientProps {
@@ -38,11 +40,35 @@ interface MyDrobeClientProps {
 export default function MyDrobeClient({ initialItems: items }: MyDrobeClientProps) {
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedItemToShare, setSelectedItemToShare] = useState<WardrobeItem | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
   const handleItemAdded = () => {
     setIsModalOpen(false);
+    startTransition(() => {
+      router.refresh();
+    });
+  };
+
+  const handleOpenShare = (item: WardrobeItem) => {
+    setSelectedItemToShare(item);
+    setIsShareModalOpen(true);
+  };
+
+  const handleShareSuccess = (count: number, itemTitle: string) => {
+    setIsShareModalOpen(false);
+    setShareFeedback(
+      count > 0
+        ? `"${itemTitle}" shared to ${count} ${count === 1 ? "circle" : "circles"}!`
+        : `"${itemTitle}" is already shared in your circles.`
+    );
+    setTimeout(() => {
+      setShareFeedback(null);
+    }, 4000);
     startTransition(() => {
       router.refresh();
     });
@@ -96,6 +122,14 @@ export default function MyDrobeClient({ initialItems: items }: MyDrobeClientProp
           }
           className="mt-3"
         />
+
+        {/* Success toast / feedback banner */}
+        {shareFeedback && (
+          <div className="mt-3 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-2.5 text-xs font-semibold text-emerald-900 animate-in fade-in duration-200">
+            <Check className="h-4 w-4 shrink-0 text-emerald-600" />
+            <span>{shareFeedback}</span>
+          </div>
+        )}
 
         {/* Category Pills (horizontal scroll) */}
         <div className="hide-scrollbar -mx-1 mt-3.5 flex gap-1.5 overflow-x-auto px-1 py-1">
@@ -176,6 +210,26 @@ export default function MyDrobeClient({ initialItems: items }: MyDrobeClientProp
                         ))}
                       </div>
                     )}
+
+                    {/* Share to Circle Trigger & Status */}
+                    <div className="mt-2.5 flex items-center justify-between border-t border-border-neutral/60 pt-2">
+                      <span className="font-mono text-[9px] text-muted truncate max-w-[80px]">
+                        {item.sharedCirclesCount && item.sharedCirclesCount > 0
+                          ? `In ${item.sharedCirclesCount} ${
+                              item.sharedCirclesCount === 1 ? "Circle" : "Circles"
+                            }`
+                          : "Private"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenShare(item)}
+                        className="flex items-center gap-1 rounded-lg border border-border-neutral bg-buttercream px-2 py-1 text-[10px] font-bold text-french-navy transition hover:border-french-navy hover:bg-french-navy hover:text-white shadow-2xs active:scale-95"
+                        title={`Share "${item.title}" to circles`}
+                      >
+                        <Share2 size={10} strokeWidth={2.5} />
+                        <span>Share</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -192,6 +246,14 @@ export default function MyDrobeClient({ initialItems: items }: MyDrobeClientProp
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSuccess={handleItemAdded}
+      />
+
+      {/* Share Item to Circles Modal */}
+      <ShareItemModal
+        item={selectedItemToShare}
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        onSuccess={handleShareSuccess}
       />
     </div>
   );

@@ -2,25 +2,27 @@
 
 /**
  * ==============================================================================
- * QA Advocate Test Suite: Social Engine & Resend Email Edge Cases (Part 2 Gate)
+ * QA Advocate Test Suite: Social Engine, Sharing & Resend Edge Cases (Gate 4)
  * ==============================================================================
  * Validates:
  * 1. UUID & Format Validation:
  *    - 1A: Malformed or empty UUIDs rejected
  *    - 1B: Self-friending attempts rejected
  * 2. Circle Creation Input Validation:
- *    - 2A: Rejects names under 2 characters
- *    - 2B: Rejects names over 50 characters
- *    - 2C: Rejects descriptions over 250 characters
+ *    - 2A: Rejects circle names under 2 characters
+ *    - 2B: Rejects circle names over 50 characters
+ *    - 2C: Rejects circle descriptions over 250 characters
  * 3. Resend Email Error Handling:
  *    - 3A: Missing RESEND_API_KEY is handled gracefully (returns skipped: true, no crash)
  *    - 3B: Resend API failure or network timeout is caught and logged (non-fatal)
- *    - 3C: HTML template sanitization prevents XSS injection
- * 4. Business Logic Integrity:
- *    - 4A: Existing friend check blocks duplicate requests
- *    - 4B: Re-friending when already accepted returns friendly message
- *    - 4C: Joining circle when already member returns friendly message
- *    - 4D: Sharing non-owned item to circle is blocked
+ *    - 3C: Resend API rejection error is captured cleanly
+ *    - 3D: HTML template sanitization prevents XSS injection
+ * 4. Item Sharing to Circles Validation:
+ *    - 4A: Rejects sharing when circle array is empty
+ *    - 4B: Rejects invalid or malformed circle IDs in batch share
+ *    - 4C: Rejects invalid item ID
+ *    - 4D: Correctly filters out already-shared circles to prevent duplicate inserts
+ *    - 4E: Returns 0 new shares when garment is already present in all selected circles
  * ==============================================================================
  */
 
@@ -53,6 +55,26 @@ function validateCircleInputs(name, description) {
   return { valid: true };
 }
 
+function validateShareInputs(circleIds, itemId) {
+  if (!isValidUuid(itemId)) {
+    return { valid: false, error: "Invalid item ID provided." };
+  }
+  if (!Array.isArray(circleIds) || circleIds.length === 0) {
+    return { valid: false, error: "Please select at least one circle to share with." };
+  }
+  for (const cid of circleIds) {
+    if (!isValidUuid(cid)) {
+      return { valid: false, error: `Invalid circle ID: ${cid}` };
+    }
+  }
+  return { valid: true };
+}
+
+function filterNewCirclesToShare(targetCircleIds, alreadySharedCircleIds) {
+  const alreadySharedSet = new Set(alreadySharedCircleIds);
+  return targetCircleIds.filter((cid) => !alreadySharedSet.has(cid));
+}
+
 function escapeHtml(str) {
   return str
     .replace(/&/g, "&amp;")
@@ -81,7 +103,7 @@ async function simulateResendSend({ apiKey, throwsError = false, apiFails = fals
 }
 
 console.log("==================================================");
-console.log("  QA Advocate: Social Engine & Email Validation   ");
+console.log("  QA Advocate: Social Engine & Sharing Validation ");
 console.log("==================================================");
 
 // 1. UUID Validation
@@ -134,6 +156,31 @@ async function testResend() {
 
 await testResend();
 
+// 4. Item Sharing to Circles Validation
+const validItemId = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+const validCircle1 = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+const validCircle2 = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+
+assert.equal(validateShareInputs([], validItemId).valid, false, "4A failed");
+console.log("  ✅ [PASS] 4A: Rejects sharing when circle checklist is empty");
+
+assert.equal(validateShareInputs([validCircle1, "bad-id"], validItemId).valid, false, "4B failed");
+console.log("  ✅ [PASS] 4B: Rejects invalid or malformed circle IDs in share selection");
+
+assert.equal(validateShareInputs([validCircle1], "not-a-valid-item-id").valid, false, "4C failed");
+console.log("  ✅ [PASS] 4C: Rejects invalid or malformed garment item IDs");
+
+const alreadyShared = [validCircle1];
+const targetCircles = [validCircle1, validCircle2];
+const newCirclesToShare = filterNewCirclesToShare(targetCircles, alreadyShared);
+assert.equal(newCirclesToShare.length, 1);
+assert.equal(newCirclesToShare[0], validCircle2);
+console.log("  ✅ [PASS] 4D: Correctly filters out already-shared circles to prevent duplicate junction rows");
+
+const allAlreadyShared = filterNewCirclesToShare([validCircle1], [validCircle1]);
+assert.equal(allAlreadyShared.length, 0);
+console.log("  ✅ [PASS] 4E: Gracefully detects when garment is already shared in all selected circles");
+
 console.log("==================================================");
-console.log("🎉 All 8 Social Engine & Resend tests PASSED!");
+console.log("🎉 All 13 Social Engine & Item Sharing tests PASSED!");
 console.log("==================================================");
