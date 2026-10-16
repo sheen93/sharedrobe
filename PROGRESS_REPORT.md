@@ -2,8 +2,8 @@
 
 > **Document Type:** Multi-Agent System Handoff & System State Blueprint  
 > **Repository:** `sheen93/sharedrobe`  
-> **Last Updated:** October 12, 2026 (Local Time: 22:30 EDT)  
-> **Current Stable Commit on `main`:** `be95d4c`  
+> **Last Updated:** October 15, 2026 (Local Time: 22:15 EDT)  
+> **Current Stable Commit on `main`:** `0afeac2`  
 > **Active Environment:** Next.js 16.3.5 (App Router, Turbopack) / React 19 / TypeScript 5 / Tailwind CSS v4 / Supabase (@supabase/ssr)
 
 ---
@@ -89,6 +89,36 @@ This document serves as an exhaustive, definitive record of every engineering de
 
 ---
 
+### Milestone 4: Mobile Closet Loading Freeze Fix & Full-Bleed Responsive Layout (`fix/mobile-closet-loading-and-layout`)
+- **Bug Diagnosis & Root Causes:**
+  1. *Mobile Loading Freeze:* On mobile browsers, `/` (`MyDrobe`) froze in an indefinite "Loading Closet..." spinner. In React 19, `createBrowserClient()` was re-instantiated on every render inside `src/app/page.tsx` within a client component, causing `navigator.locks` auth token acquisition deadlocks and effect cleanups that stranded `isLoading = true`.
+  2. *Cross-Origin Dev Origin Blocking:* Accessing the dev server from local mobile devices (`192.168.1.153:3000`) was blocked by Next.js due to hardcoded single IP `192.168.1.52` in `next.config.ts`.
+  3. *Double Bezel & Mockup Badges:* On physical mobile screens, fixed desktop demo shells (`max-w-[390px] rounded-[32px] border shadow-2xl p-4`) caused nested "phone-inside-a-phone" borders, and dev badges (`SCREEN 1`, `SCREEN 2`, `SCREEN 3`, `AUTH`) cluttered the interface.
+- **Architectural Solutions:**
+  - **Server-Side Data Fetching (SSR Streaming):**
+    - Converted `src/app/page.tsx` into an asynchronous Server Component utilizing `createClient()` from `@/utils/supabase/server.ts` with cookie-based session verification.
+    - Wardrobe items are loaded server-side and streamed immediately in initial HTML, entirely eliminating client-side loading spinners on initial page visit.
+  - **Hydrated Client Component (`src/app/MyDrobeClient.tsx`):**
+    - Created `MyDrobeClient.tsx` receiving preloaded items as props.
+    - Category filtering is evaluated directly in-memory with zero network latency.
+    - Upload refresh is handled cleanly via React 19 `useTransition` and `router.refresh()` without tearing or duplicate state.
+  - **Singleton Browser Client (`src/utils/supabase/client.ts`):**
+    - Updated `createClient()` to reuse a module-level `browserClient` singleton, resolving mobile browser `navigator.locks` token contention.
+  - **Full-Bleed Responsive Layout Shell:**
+    - Standardized all application views (`/`, `/sharedrobe`, `/profile`, `/login`) to use a responsive `<main>` shell (`flex w-full max-w-md flex-1 flex-col bg-buttercream p-4 pb-28 sm:rounded-[32px] sm:border sm:border-border-neutral sm:p-5 sm:shadow-2xl`).
+    - On mobile phones, content extends smoothly to the screen edges with native ergonomics; on desktop, it displays as an elegant centered card.
+    - Removed all artificial mockup badge tags (`SCREEN 1`, `SCREEN 2`, `SCREEN 3`, `AUTH // Secure Closet Access`).
+  - **LAN Dev Access (`next.config.ts`):**
+    - Expanded `allowedDevOrigins` to support active LAN IP `192.168.1.153`, local subnet wildcards (`192.168.*.*`, `10.*.*.*`, `172.*.*.*`), and `localhost`.
+- **Validation & Quality Gates:**
+  - 0 ESLint errors (ESLint 9 compliant).
+  - 0 TypeScript errors (`tsc --noEmit`).
+  - 14/14 automated QA edge-case tests passing (`npm test`).
+  - Next.js 16 Turbopack production build succeeded (`npm run build`).
+- **Merged to `main` at commit `0afeac2`.**
+
+---
+
 ## 3. Current Architecture & File-by-File Blueprint
 
 ```
@@ -113,7 +143,8 @@ sharedrobe/
 │   │   │   └── page.tsx            # Community Sharing Hub (Screen 2 Stitch mockup)
 │   │   ├── globals.css             # Tailwind v4 @theme design tokens (Parisian Navy & Dusty Lilac)
 │   │   ├── layout.tsx              # Root HTML shell with typography & viewport settings
-│   │   └── page.tsx                # MyDrobe closet feed with category pills, grid, and upload trigger
+│   │   ├── page.tsx                # Server Component: authenticates & prefetches MyDrobe items via SSR
+│   │   └── MyDrobeClient.tsx       # Hydrated client view: in-memory category filter, AddItemModal trigger
 │   ├── components/
 │   │   ├── ui/
 │   │   │   ├── FieldCard.tsx       # Stitch-styled chalk form card with labels & captions
