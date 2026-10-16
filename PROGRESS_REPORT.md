@@ -151,6 +151,44 @@ This document serves as an exhaustive, definitive record of every engineering de
 
 ---
 
+### Milestone 6: Circle Member Friends Addition & Notification Engine (`feat/add-friends-to-circle`)
+- **Backend & Server Actions (`src/app/sharedrobe/actions.ts`):**
+  - Built typed server action `addFriendsToCircle(circleId, friendUserIds)`:
+    - UUID format validation for circle and friend IDs.
+    - Session authentication verification.
+    - Verifies current user is an approved admin or member of the circle.
+    - Strict friendship verification: confirms all targets are accepted friends in `friendships`.
+    - Duplicate member filtering: prevents duplicate key constraint errors by filtering out already-approved members.
+    - Inserts new members into `circle_members` with `role: 'member'` and `status: 'approved'`.
+    - Dispatches transactional Resend notification emails via `sendCircleAddedNotificationEmail`.
+    - Revalidates `/sharedrobe`.
+  - Built typed server action `getCircleFriendsStatus(circleId)`:
+    - Maps all connected friends against `circle_members` to accurately indicate member/pending/available statuses.
+- **Resend Email Integration (`src/utils/email/resend.ts`):**
+  - Added `sendCircleAddedNotificationEmail`:
+    - Sends clean, Stitch-styled transactional HTML email notifying friends that they were added to the circle.
+    - Defensive error boundary: skips safely if `RESEND_API_KEY` is not configured without failing the action.
+- **Frontend & Stitch UI Components:**
+  - Created `src/components/AddFriendsToCircleModal.tsx`:
+    - Google Stitch modal with responsive full-bleed mobile container and centered desktop card.
+    - Real-time search filter for large friend lists.
+    - Displays friend avatar badges, full names, emails, and live circle status (`MEMBER`, `PENDING`, or selectable checkbox).
+    - Quick "Select All" / "Deselect All" action.
+    - Empty state with direct shortcut to search members if no friends are connected yet.
+  - Updated `src/app/sharedrobe/SharedrobeClient.tsx`:
+    - Added "+ Add Friends" quick action button directly on each circle card header.
+    - Added dedicated member management bar and "+ Add Friends to Circle" button inside the expanded circle drawer.
+    - Added instant feedback banners on successful friend additions.
+  - Updated `src/app/sharedrobe/page.tsx`:
+    - SSR queries enriched to fetch `user_id` in `circle_members` and preload `memberUserIds` on `UserCircleData` for zero-latency instant hydration.
+- **QA Verification & Edge Case Matrix:**
+  - Expanded `scripts/test-social-actions-edge-cases.mjs` with Section 5 (6 new tests for empty lists, invalid UUIDs, non-friends, duplicate prevention, and HTML template escaping).
+  - Total automated tests increased from 27 to 33 passing tests (14 upload + 19 social).
+  - 0 ESLint errors, 0 TypeScript errors, Turbopack build succeeded.
+- **Merged to `main` at commit `2186d0e`.**
+
+---
+
 ## 3. Current Architecture & File-by-File Blueprint
 
 ```
@@ -159,7 +197,7 @@ sharedrobe/
 ├── docs/
 │   └── AUTH.md                     # Supabase authentication & deployment guide
 ├── scripts/
-│   ├── test-social-actions-edge-cases.mjs # QA Advocate social actions test suite (13 tests)
+│   ├── test-social-actions-edge-cases.mjs # QA Advocate social actions test suite (19 tests)
 │   ├── test-upload-edge-cases.mjs  # QA Advocate automated edge-case test suite (14 tests)
 │   └── validate-and-pr.sh          # CI pre-PR pipeline (lint -> typecheck -> test -> build -> push)
 ├── src/
@@ -173,7 +211,7 @@ sharedrobe/
 │   │   │   ├── page.tsx            # Server Component fetching authenticated user
 │   │   │   └── ProfileClient.tsx   # Interactive profile form with password modal trigger
 │   │   ├── sharedrobe/
-│   │   │   ├── actions.ts          # Phase 2 Server actions (friends, circles, item sharing)
+│   │   │   ├── actions.ts          # Phase 2 Server actions (friends, circles, item sharing, add friends)
 │   │   │   ├── page.tsx            # Community Hub SSR Server Component prefetching circles & friends
 │   │   │   └── SharedrobeClient.tsx # 3-tab UI: My Circles, My Friends, Real-Time Search & Pending Requests
 │   │   ├── globals.css             # Tailwind v4 @theme design tokens (Parisian Navy & Dusty Lilac)
@@ -188,6 +226,7 @@ sharedrobe/
 │   │   │   ├── InfoBar.tsx         # Compact status strip below screen headers
 │   │   │   ├── ScreenHeader.tsx    # Header with uppercase mono breadcrumb + screen title
 │   │   │   └── SubmitButton.tsx    # Accessible CTA button with pending loader (useFormStatus)
+│   │   ├── AddFriendsToCircleModal.tsx # Modal for adding members from friends list into a circle
 │   │   ├── AddItemModal.tsx        # Camera/upload modal with compression & error handling
 │   │   ├── BottomNav.tsx           # Floating Parisian Navy 3-tab pill (MyDrobe, ShareDrobe, Profile)
 │   │   ├── CreateCircleModal.tsx   # Modal for creating new wardrobe circles
@@ -340,7 +379,7 @@ Run all checks locally with:
 ```bash
 npm run lint         # ESLint 9 (0 errors, 0 warnings)
 npm run typecheck    # TypeScript 5 (No type errors)
-npm test             # QA Advocate unified test suites (27 passing tests)
+npm test             # QA Advocate unified test suites (33 passing tests)
 npm run build        # Next.js 16 Turbopack build (All routes compiled)
 ```
 
@@ -370,23 +409,30 @@ npm run build        # Next.js 16 Turbopack build (All routes compiled)
 🎉 All 14 Upload QA edge case test scenarios PASSED!
 
 ==================================================
-  QA Advocate: Phase 2 Social Actions Edge Cases
+  QA Advocate: Social Engine & Sharing Validation 
 ==================================================
-  ✅ [PASS] Friend Request 1A: Rejects missing recipient
-  ✅ [PASS] Friend Request 1B: Rejects self-friending
-  ✅ [PASS] Friend Request 1C: Rejects non-existent addressee profile
-  ✅ [PASS] Respond Friend 2A: Rejects unauthorized user responding
-  ✅ [PASS] Create Circle 3A: Rejects empty circle name
-  ✅ [PASS] Create Circle 3B: Rejects whitespace-only circle name
-  ✅ [PASS] Create Circle 3C: Truncates/rejects names exceeding 50 chars
-  ✅ [PASS] Join Circle 4A: Rejects joining non-existent circle
-  ✅ [PASS] Share Item 5A: Rejects non-owner attempting to share item
-  ✅ [PASS] Share Item 5B: Rejects non-member attempting to share to circle
-  ✅ [PASS] Share Item 5C: Rejects pending circle member attempting to share
-  ✅ [PASS] Resend Boundary 6A: Gracefully skips email when RESEND_API_KEY is missing
-  ✅ [PASS] Resend Boundary 6B: Catches and logs Resend SDK network failure without failing action
+  ✅ [PASS] 1A: UUID validation correctly accepts valid v4 UUIDs and rejects malformed strings
+  ✅ [PASS] 1B: Self-friending comparison accurately detects identical requester and addressee
+  ✅ [PASS] 2A: Rejects circle names under 2 characters
+  ✅ [PASS] 2B: Rejects circle names over 50 characters, accepts valid names
+  ✅ [PASS] 2C: Rejects circle descriptions exceeding 250 characters
+  ✅ [PASS] 3A: Missing RESEND_API_KEY gracefully returns skipped without crashing
+  ✅ [PASS] 3B: Resend network/exception failure is gracefully caught without throwing unhandled error
+  ✅ [PASS] 3C: Resend API rejection error is captured cleanly
+  ✅ [PASS] 3D: HTML template escaping effectively neutralizes potential script tags and special chars
+  ✅ [PASS] 4A: Rejects sharing when circle checklist is empty
+  ✅ [PASS] 4B: Rejects invalid or malformed circle IDs in share selection
+  ✅ [PASS] 4C: Rejects invalid or malformed garment item IDs
+  ✅ [PASS] 4D: Correctly filters out already-shared circles to prevent duplicate junction rows
+  ✅ [PASS] 4E: Gracefully detects when garment is already shared in all selected circles
+  ✅ [PASS] 5A: Rejects adding friends when friends selection is empty
+  ✅ [PASS] 5B: Rejects invalid circle ID in addFriendsToCircle
+  ✅ [PASS] 5C: Rejects malformed or invalid friend user IDs in batch selection
+  ✅ [PASS] 5D: Correctly filters out friends who are already members of circle
+  ✅ [PASS] 5E: Gracefully detects when all selected friends are already members
+  ✅ [PASS] 5F: Circle added transactional notification safely escapes recipient and circle names
 ==================================================
-🎉 All 13 Social QA edge case test scenarios PASSED!
+🎉 All 19 Social Engine, Circle Friends & Sharing tests PASSED!
 ```
 
 ---
