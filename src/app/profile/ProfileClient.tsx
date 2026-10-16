@@ -61,17 +61,9 @@ export default function ProfileClient({
   };
 
   return (
-    <div className="flex min-h-dvh flex-col items-center bg-linen p-4 pb-24 sm:p-6">
-      {/* Dev/Screen indicator from Stitch mockup */}
-      <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted">
-        <span className="rounded bg-midnight-slate px-2 py-0.5 text-[10px] text-white">
-          SCREEN 3
-        </span>
-        <span>Minimal Account Profile</span>
-      </div>
-
-      {/* Mobile Shell */}
-      <div className="flex w-full max-w-[390px] flex-col overflow-hidden rounded-[32px] border border-border-neutral bg-buttercream p-5 shadow-2xl">
+    <div className="flex min-h-dvh flex-col items-center bg-linen sm:py-6">
+      {/* Responsive App Shell: Full-width on mobile devices, centered card on desktops */}
+      <main className="flex w-full max-w-md flex-1 flex-col bg-buttercream p-4 pb-28 sm:rounded-[32px] sm:border sm:border-border-neutral sm:p-5 sm:shadow-2xl">
         {/* App Header */}
         <ScreenHeader
           meta="USER // ACCOUNT"
@@ -279,7 +271,7 @@ export default function ProfileClient({
             </form>
           </div>
         </div>
-      </div>
+      </main>
 
       {/* Persistent Bottom Nav with Profile active */}
       <BottomNav />

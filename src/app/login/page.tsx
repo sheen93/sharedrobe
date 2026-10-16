@@ -26,17 +26,9 @@ export default function LoginPage() {
   );
 
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center bg-linen p-4 sm:p-6">
-      {/* Visual Subtitle for Dev / Mockup fidelity */}
-      <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted">
-        <span className="rounded bg-french-navy px-2 py-0.5 text-[10px] text-white">
-          AUTH
-        </span>
-        <span>Secure Closet Access</span>
-      </div>
-
-      {/* Mobile-sized shell matching Stitch Screen cards */}
-      <div className="flex w-full max-w-[390px] flex-col overflow-hidden rounded-[32px] border border-border-neutral bg-buttercream p-5 shadow-2xl">
+    <div className="flex min-h-dvh flex-col items-center justify-center bg-linen sm:py-6">
+      {/* Responsive App Shell: Full-width on mobile devices, centered card on desktops */}
+      <main className="flex w-full max-w-md flex-1 flex-col justify-center bg-buttercream p-5 sm:flex-initial sm:rounded-[32px] sm:border sm:border-border-neutral sm:shadow-2xl">
         {/* App Header */}
         <ScreenHeader
           meta={mode === "signin" ? "AUTH // SIGN_IN" : "AUTH // SIGN_UP"}
@@ -257,7 +249,7 @@ export default function LoginPage() {
             </form>
           )}
         </div>
-      </div>
+      </main>
     </div>
   );
 }
