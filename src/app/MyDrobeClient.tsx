@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, Database, Shirt, Tag, Sparkles, Share2, Check } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
@@ -9,6 +10,7 @@ import AddItemModal from "@/components/AddItemModal";
 import ShareItemModal from "@/components/ShareItemModal";
 import ScreenHeader from "@/components/ui/ScreenHeader";
 import InfoBar from "@/components/ui/InfoBar";
+import { cn } from "@/utils/cn";
 
 export const CATEGORIES = [
   "All",
@@ -30,6 +32,9 @@ export interface WardrobeItem {
   owner_id?: string;
   created_at?: string;
   sharedCirclesCount?: number;
+  status?: string;
+  borrowedBy?: string | null;
+  borrowerName?: string | null;
 }
 
 interface MyDrobeClientProps {
@@ -180,39 +185,68 @@ export default function MyDrobeClient({ initialItems: items }: MyDrobeClientProp
               {filteredItems.map((item) => (
                 <div
                   key={item.id}
-                  className="group flex flex-col overflow-hidden rounded-2xl border border-border-neutral bg-chalk shadow-xs transition hover:shadow-md"
+                  className="group relative flex flex-col overflow-hidden rounded-2xl border border-border-neutral bg-chalk shadow-xs transition hover:shadow-md hover:border-french-navy/40"
                 >
-                  <div className="relative aspect-[4/5] w-full overflow-hidden bg-buttercream">
-                    <Image
-                      src={item.image_url}
-                      alt={item.title}
-                      fill
-                      unoptimized
-                      className="object-cover transition duration-300 group-hover:scale-105"
-                    />
-                    <div className="absolute top-2 right-2 rounded-md border border-border-neutral bg-buttercream/90 px-1.5 py-0.5 font-mono text-[10px] font-bold text-french-navy backdrop-blur-xs">
-                      {item.category}
-                    </div>
-                  </div>
-                  <div className="p-3">
-                    <h3 className="truncate text-xs font-bold text-midnight-slate">
-                      {item.title}
-                    </h3>
-                    {item.tags && item.tags.length > 0 && (
-                      <div className="mt-1.5 flex flex-wrap gap-1">
-                        {item.tags.slice(0, 2).map((tag) => (
-                          <span
-                            key={tag}
-                            className="inline-flex items-center gap-0.5 rounded-md border border-border-neutral bg-buttercream px-1.5 py-0.5 font-mono text-[9px] text-muted"
-                          >
-                            <Tag size={8} /> #{tag}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                  <Link
+                    href={`/items/${item.id}`}
+                    className="flex flex-1 flex-col focus:outline-hidden"
+                  >
+                    <div className="relative aspect-[4/5] w-full overflow-hidden bg-buttercream">
+                      <Image
+                        src={item.image_url}
+                        alt={item.title}
+                        fill
+                        unoptimized
+                        className="object-cover transition duration-300 group-hover:scale-105"
+                      />
 
-                    {/* Share to Circle Trigger & Status */}
-                    <div className="mt-2.5 flex items-center justify-between border-t border-border-neutral/60 pt-2">
+                      {/* Visual Status Badges if not Available */}
+                      {item.status && item.status !== "Available" && (
+                        <div className="absolute top-2 left-2 z-10">
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[9px] font-bold shadow-xs backdrop-blur-xs",
+                              item.status === "Lent Out"
+                                ? "border border-dusty-lilac bg-dusty-lilac/95 text-white"
+                                : "border border-amber-400 bg-amber-500/95 text-white"
+                            )}
+                          >
+                            {item.status === "Lent Out"
+                              ? item.borrowerName
+                                ? `Lent to ${item.borrowerName.split(" ")[0]}`
+                                : "Lent Out"
+                              : "In Laundry"}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="absolute top-2 right-2 rounded-md border border-border-neutral bg-buttercream/90 px-1.5 py-0.5 font-mono text-[10px] font-bold text-french-navy backdrop-blur-xs">
+                        {item.category}
+                      </div>
+                    </div>
+
+                    <div className="p-3 pb-1">
+                      <h3 className="truncate text-xs font-bold text-midnight-slate group-hover:text-french-navy transition-colors">
+                        {item.title}
+                      </h3>
+                      {item.tags && item.tags.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {item.tags.slice(0, 2).map((tag) => (
+                            <span
+                              key={tag}
+                              className="inline-flex items-center gap-0.5 rounded-md border border-border-neutral bg-buttercream px-1.5 py-0.5 font-mono text-[9px] text-muted"
+                            >
+                              <Tag size={8} /> #{tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </Link>
+
+                  {/* Share to Circle Trigger & Status */}
+                  <div className="p-3 pt-0">
+                    <div className="mt-2 flex items-center justify-between border-t border-border-neutral/60 pt-2">
                       <span className="font-mono text-[9px] text-muted truncate max-w-[80px]">
                         {item.sharedCirclesCount && item.sharedCirclesCount > 0
                           ? `In ${item.sharedCirclesCount} ${
@@ -222,7 +256,11 @@ export default function MyDrobeClient({ initialItems: items }: MyDrobeClientProp
                       </span>
                       <button
                         type="button"
-                        onClick={() => handleOpenShare(item)}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleOpenShare(item);
+                        }}
                         className="flex items-center gap-1 rounded-lg border border-border-neutral bg-buttercream px-2 py-1 text-[10px] font-bold text-french-navy transition hover:border-french-navy hover:bg-french-navy hover:text-white shadow-2xs active:scale-95"
                         title={`Share "${item.title}" to circles`}
                       >
