@@ -9,6 +9,8 @@ import {
   Users,
   UserCheck,
   UserPlus,
+  UserMinus,
+  LogOut,
   Search,
   Check,
   X,
@@ -30,6 +32,8 @@ import {
   respondToFriendRequest,
   requestJoinCircle,
   respondToCircleMemberRequest,
+  removeCircleMember,
+  leaveCircle,
   searchSocial,
   type SocialSearchResult,
 } from "./actions";
@@ -45,6 +49,15 @@ export interface CircleItemPreview {
   borrowerName?: string | null;
 }
 
+export interface CircleMemberSummary {
+  membershipId: string;
+  userId: string;
+  fullName: string;
+  email: string;
+  role: "admin" | "member";
+  isCurrentUser: boolean;
+}
+
 export interface UserCircleData {
   id: string;
   name: string;
@@ -55,6 +68,7 @@ export interface UserCircleData {
   sharedItemCount: number;
   items?: CircleItemPreview[];
   memberUserIds?: string[];
+  members?: CircleMemberSummary[];
 }
 
 export interface UserFriendData {
@@ -269,6 +283,44 @@ export default function SharedrobeClient({
             c.id === circleId ? { ...c, membershipStatus: "pending" } : c
           ),
         }));
+        router.refresh();
+      } else {
+        showFeedback("error", res.error);
+      }
+    });
+  };
+
+  const handleRemoveCircleMember = (
+    circleId: string,
+    membershipId: string,
+    memberName: string
+  ) => {
+    setActiveActionId(membershipId);
+    startTransition(async () => {
+      const res = await removeCircleMember(circleId, membershipId);
+      setActiveActionId(null);
+      if (res.success) {
+        showFeedback(
+          "success",
+          `${memberName} was removed from the circle.`
+        );
+        router.refresh();
+      } else {
+        showFeedback("error", res.error);
+      }
+    });
+  };
+
+  const handleLeaveCircle = (circleId: string, circleName: string) => {
+    setActiveActionId(`leave-${circleId}`);
+    startTransition(async () => {
+      const res = await leaveCircle(circleId);
+      setActiveActionId(null);
+      if (res.success) {
+        showFeedback("success", `You have left "${circleName}".`);
+        if (expandedCircleId === circleId) {
+          setExpandedCircleId(null);
+        }
         router.refresh();
       } else {
         showFeedback("error", res.error);
@@ -558,7 +610,8 @@ export default function SharedrobeClient({
               <div className="space-y-2.5">
                 {approvedCircles.map((circle) => {
                   const isExpanded = expandedCircleId === circle.id;
-                  const circleItems = circle.items || [];
+                  const circleMembers = circle.members || [];
+                  const isCircleAdmin = circle.role === "admin";
 
                   return (
                     <div
@@ -581,14 +634,19 @@ export default function SharedrobeClient({
                               <h4 className="text-sm font-bold text-midnight-slate truncate">
                                 {circle.name}
                               </h4>
-                              {circle.role === "admin" && (
+                              {isCircleAdmin && (
                                 <span className="inline-flex items-center gap-0.5 rounded border border-french-navy/20 bg-french-navy/10 px-1.5 py-0.2 font-mono text-[9px] font-bold text-french-navy">
                                   <Shield size={9} /> ADMIN
                                 </span>
                               )}
                             </div>
                             <p className="text-[11px] text-muted truncate">
-                              {circle.description || "Shared wardrobe circle"}
+                              {circle.description ||
+                                `${circle.sharedItemCount} shared ${
+                                  circle.sharedItemCount === 1 ? "look" : "looks"
+                                } • ${circle.memberCount} ${
+                                  circle.memberCount === 1 ? "member" : "members"
+                                }`}
                             </p>
                           </div>
                         </div>
@@ -604,18 +662,20 @@ export default function SharedrobeClient({
                             <ChevronRight size={11} strokeWidth={2.5} />
                           </Link>
 
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setAddFriendsModalCircle(circle);
-                            }}
-                            className="flex items-center gap-1 rounded-lg border border-border-neutral bg-buttercream px-2 py-1 text-[10px] font-bold text-french-navy transition hover:bg-french-navy hover:text-white shadow-2xs active:scale-95"
-                            title="Add friends to this circle"
-                          >
-                            <UserPlus size={11} strokeWidth={2.5} />
-                            <span className="hidden sm:inline">Add Friends</span>
-                          </button>
+                          {isCircleAdmin && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setAddFriendsModalCircle(circle);
+                              }}
+                              className="flex items-center gap-1 rounded-lg border border-border-neutral bg-buttercream px-2 py-1 text-[10px] font-bold text-french-navy transition hover:bg-french-navy hover:text-white shadow-2xs active:scale-95"
+                              title="Add friends to this circle"
+                            >
+                              <UserPlus size={11} strokeWidth={2.5} />
+                              <span className="hidden sm:inline">Add Friends</span>
+                            </button>
+                          )}
 
                           <ChevronRight
                             className={cn(
@@ -626,7 +686,7 @@ export default function SharedrobeClient({
                         </div>
                       </button>
 
-                      {/* Expandable shared garments preview in this circle */}
+                      {/* Expandable Circle Member Avatars & Role Controls (Garments only shown inside the Circle Closet) */}
                       {isExpanded && (
                         <div className="border-t border-border-neutral/60 bg-buttercream/50 p-3.5 animate-in fade-in duration-150">
                           {/* Circle Member Management Bar */}
@@ -634,18 +694,45 @@ export default function SharedrobeClient({
                             <div className="flex items-center gap-1.5">
                               <Users size={12} className="text-dusty-lilac" />
                               <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted">
-                                CIRCLE MEMBERS ({circle.memberCount})
+                                CIRCLE MEMBERS ({circleMembers.length || circle.memberCount})
                               </span>
                             </div>
+
                             <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => setAddFriendsModalCircle(circle)}
-                                className="flex items-center gap-1 rounded-lg border border-border-neutral bg-chalk px-2 py-1 text-[10px] font-bold text-french-navy transition hover:bg-french-navy hover:text-white active:scale-95 shadow-2xs"
-                              >
-                                <UserPlus size={11} strokeWidth={2.5} />
-                                <span>+ Add Friends</span>
-                              </button>
+                              {isCircleAdmin ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setAddFriendsModalCircle(circle)}
+                                  className="flex items-center gap-1 rounded-lg border border-border-neutral bg-chalk px-2.5 py-1 text-[10px] font-bold text-french-navy transition hover:bg-french-navy hover:text-white active:scale-95 shadow-2xs"
+                                >
+                                  <UserPlus size={11} strokeWidth={2.5} />
+                                  <span>+ Add Friends</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={
+                                    isPending &&
+                                    activeActionId === `leave-${circle.id}`
+                                  }
+                                  onClick={() =>
+                                    handleLeaveCircle(circle.id, circle.name)
+                                  }
+                                  className="flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-[10px] font-bold text-rose-700 transition hover:bg-rose-100 active:scale-95 shadow-2xs disabled:opacity-50"
+                                >
+                                  {isPending &&
+                                  activeActionId === `leave-${circle.id}` ? (
+                                    <Loader2
+                                      size={11}
+                                      className="animate-spin"
+                                    />
+                                  ) : (
+                                    <LogOut size={11} strokeWidth={2.5} />
+                                  )}
+                                  <span>Leave Circle</span>
+                                </button>
+                              )}
+
                               <Link
                                 href={`/sharedrobe/${circle.id}`}
                                 className="flex items-center gap-1 rounded-lg bg-french-navy px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-french-navy-hover active:scale-95 shadow-xs"
@@ -655,66 +742,85 @@ export default function SharedrobeClient({
                             </div>
                           </div>
 
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted">
-                              SHARED GARMENTS ({circleItems.length})
-                            </span>
-                            <span className="text-[10px] text-dusty-lilac font-medium">
-                              From MyDrobe & Friends
-                            </span>
-                          </div>
+                          {/* Small Round Member Profiles / Avatars */}
+                          <div className="flex flex-wrap items-start gap-3 py-1">
+                            {circleMembers.map((member) => {
+                              const initial = (
+                                member.fullName.trim()[0] ||
+                                member.email.trim()[0] ||
+                                "M"
+                              ).toUpperCase();
+                              const firstName = member.isCurrentUser
+                                ? "You"
+                                : member.fullName.split(" ")[0] || "Member";
+                              const canRemoveMember =
+                                isCircleAdmin && !member.isCurrentUser;
 
-                          {circleItems.length === 0 ? (
-                            <p className="py-3 text-center text-xs text-muted">
-                              No garments shared into this circle yet. Use the Add/Share button in MyDrobe to share clothes!
-                            </p>
-                          ) : (
-                            <div className="grid grid-cols-3 gap-2">
-                              {circleItems.map((item) => (
-                                <Link
-                                  key={item.id}
-                                  href={`/items/${item.id}?from=/sharedrobe`}
-                                  className="group flex flex-col overflow-hidden rounded-xl border border-border-neutral bg-chalk shadow-xs transition hover:border-french-navy hover:shadow-sm"
+                              return (
+                                <div
+                                  key={member.membershipId}
+                                  className="flex flex-col items-center text-center min-w-[56px]"
                                 >
-                                  <div className="relative aspect-square w-full bg-buttercream overflow-hidden">
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img
-                                      src={item.image_url}
-                                      alt={item.title}
-                                      className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                                    />
+                                  <div className="relative">
+                                    <div
+                                      className={cn(
+                                        "flex h-10 w-10 items-center justify-center rounded-full border text-xs font-extrabold uppercase shadow-2xs",
+                                        member.isCurrentUser
+                                          ? "border-french-navy bg-french-navy text-white"
+                                          : "border-border-strong bg-chalk text-french-navy"
+                                      )}
+                                      title={`${member.fullName} (${member.email})`}
+                                    >
+                                      {initial}
+                                    </div>
 
-                                    {/* Visual Status Badges if not Available */}
-                                    {item.status && item.status !== "Available" && (
-                                      <div className="absolute top-1 left-1 z-10">
-                                        <span
-                                          className={cn(
-                                            "inline-flex items-center gap-0.5 rounded px-1 py-0.2 font-mono text-[8px] font-bold shadow-2xs backdrop-blur-xs",
-                                            item.status === "Lent Out"
-                                              ? "bg-dusty-lilac/95 text-white"
-                                              : "bg-amber-500/95 text-white"
-                                          )}
-                                        >
-                                          {item.status === "Lent Out"
-                                            ? item.borrowerName
-                                              ? `Lent to ${item.borrowerName.split(" ")[0]}`
-                                              : "Lent Out"
-                                            : "Laundry"}
-                                        </span>
-                                      </div>
+                                    {member.role === "admin" && (
+                                      <span
+                                        className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-white bg-dusty-lilac text-white shadow-2xs"
+                                        title="Circle Admin"
+                                      >
+                                        <Shield size={8} />
+                                      </span>
                                     )}
-
-                                    <span className="absolute bottom-1 right-1 rounded bg-french-navy/80 px-1 font-mono text-[8px] text-white">
-                                      {item.category}
-                                    </span>
                                   </div>
-                                  <p className="truncate p-1 text-[10px] font-bold text-midnight-slate group-hover:text-french-navy transition-colors">
-                                    {item.title}
-                                  </p>
-                                </Link>
-                              ))}
-                            </div>
-                          )}
+
+                                  <span className="mt-1 max-w-[68px] truncate text-[10px] font-bold text-midnight-slate">
+                                    {firstName}
+                                  </span>
+
+                                  {canRemoveMember && (
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        isPending &&
+                                        activeActionId === member.membershipId
+                                      }
+                                      onClick={() =>
+                                        handleRemoveCircleMember(
+                                          circle.id,
+                                          member.membershipId,
+                                          member.fullName
+                                        )
+                                      }
+                                      className="mt-0.5 inline-flex items-center gap-0.5 rounded-full border border-rose-200 bg-rose-50 px-1.5 py-0.5 font-mono text-[8px] font-bold text-rose-700 transition hover:bg-rose-100 active:scale-95 disabled:opacity-50"
+                                      title={`Remove ${member.fullName} from circle`}
+                                    >
+                                      {isPending &&
+                                      activeActionId === member.membershipId ? (
+                                        <Loader2
+                                          size={8}
+                                          className="animate-spin"
+                                        />
+                                      ) : (
+                                        <UserMinus size={8} />
+                                      )}
+                                      <span>Remove</span>
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
                     </div>

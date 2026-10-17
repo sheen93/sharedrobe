@@ -2013,6 +2013,77 @@ export async function removeCircleMember(
   };
 }
 
+/**
+ * Allows a non-admin circle member to leave a circle.
+ * Removes any items they shared in the circle and deletes their circle_members row.
+ */
+export async function leaveCircle(
+  circleId: string
+): Promise<ActionResult<{ circleId: string }>> {
+  if (!isValidUuid(circleId)) {
+    return { success: false, error: "Invalid circle ID specified." };
+  }
 
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
+  if (!user) {
+    return {
+      success: false,
+      error: "Authentication required to leave a circle.",
+    };
+  }
 
+  const { data: myMembership, error: memberErr } = await supabase
+    .from("circle_members")
+    .select("id, role, status")
+    .eq("circle_id", circleId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (memberErr || !myMembership) {
+    return {
+      success: false,
+      error: "You are not a member of this circle.",
+    };
+  }
+
+  if (myMembership.role === "admin") {
+    return {
+      success: false,
+      error: "Circle admins cannot leave their own circle.",
+    };
+  }
+
+  // Remove any items shared by this user inside this circle
+  await supabase
+    .from("circle_items")
+    .delete()
+    .eq("circle_id", circleId)
+    .eq("shared_by", user.id);
+
+  // Delete the user's membership row
+  const { error: deleteErr } = await supabase
+    .from("circle_members")
+    .delete()
+    .eq("id", myMembership.id)
+    .eq("user_id", user.id);
+
+  if (deleteErr) {
+    return {
+      success: false,
+      error: deleteErr.message || "Failed to leave circle.",
+    };
+  }
+
+  revalidatePath("/sharedrobe");
+  revalidatePath(`/sharedrobe/${circleId}`);
+
+  return {
+    success: true,
+    message: "You have left the circle.",
+    data: { circleId },
+  };
+}

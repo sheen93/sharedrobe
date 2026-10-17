@@ -7,6 +7,7 @@ import SharedrobeClient, {
   type OutgoingFriendRequestData,
   type PendingCircleRequestData,
   type CircleItemPreview,
+  type CircleMemberSummary,
 } from "./SharedrobeClient";
 
 export const dynamic = "force-dynamic";
@@ -78,26 +79,71 @@ export default async function ShareDrobePage() {
   const memberships = (userMemberships as unknown as DbMembershipRow[]) || [];
   const circleIds = memberships.map((m) => m.circle_id);
 
-  // 2. Fetch member counts and user IDs for these circles
+  // 2. Fetch member counts, user IDs, and approved member profiles for these circles
   const memberCounts: Record<string, number> = {};
   const circleMembersMap: Record<string, string[]> = {};
-  if (circleIds.length > 0) {
-    const { data: memberRows } = await supabase
-      .from("circle_members")
-      .select("circle_id, user_id, status")
-      .in("circle_id", circleIds);
+  const circleMembersDetailsMap: Record<string, CircleMemberSummary[]> = {};
 
-    if (memberRows) {
-      memberRows.forEach((row) => {
-        if (row.status === "approved") {
-          memberCounts[row.circle_id] = (memberCounts[row.circle_id] || 0) + 1;
-        }
-        if (!circleMembersMap[row.circle_id]) {
-          circleMembersMap[row.circle_id] = [];
-        }
-        circleMembersMap[row.circle_id].push(row.user_id);
-      });
+  if (circleIds.length > 0) {
+    interface DbCircleMemberRow {
+      id: string;
+      circle_id: string;
+      user_id: string;
+      role: string;
+      status: string;
+      profile: {
+        id: string;
+        full_name: string | null;
+        email: string;
+      } | null;
     }
+
+    const { data: memberRowsData } = await supabase
+      .from("circle_members")
+      .select(`
+        id,
+        circle_id,
+        user_id,
+        role,
+        status,
+        profile:user_id (
+          id,
+          full_name,
+          email
+        )
+      `)
+      .in("circle_id", circleIds)
+      .order("role", { ascending: true })
+      .order("created_at", { ascending: true });
+
+    const memberRows =
+      (memberRowsData as unknown as DbCircleMemberRow[]) || [];
+
+    memberRows.forEach((row) => {
+      if (row.status === "approved") {
+        memberCounts[row.circle_id] = (memberCounts[row.circle_id] || 0) + 1;
+        if (!circleMembersDetailsMap[row.circle_id]) {
+          circleMembersDetailsMap[row.circle_id] = [];
+        }
+        if (row.profile) {
+          circleMembersDetailsMap[row.circle_id].push({
+            membershipId: row.id,
+            userId: row.user_id,
+            fullName:
+              row.profile.full_name ||
+              row.profile.email.split("@")[0] ||
+              "Drobe Member",
+            email: row.profile.email,
+            role: row.role === "admin" ? "admin" : "member",
+            isCurrentUser: row.user_id === user.id,
+          });
+        }
+      }
+      if (!circleMembersMap[row.circle_id]) {
+        circleMembersMap[row.circle_id] = [];
+      }
+      circleMembersMap[row.circle_id].push(row.user_id);
+    });
   }
 
   // 3. Fetch shared items in these circles
@@ -179,6 +225,7 @@ export default async function ShareDrobePage() {
       sharedItemCount: (circleItemsMap[m.circle.id] || []).length,
       items: circleItemsMap[m.circle.id] || [],
       memberUserIds: circleMembersMap[m.circle.id] || [],
+      members: circleMembersDetailsMap[m.circle.id] || [],
     }));
 
   // 4. Fetch friendships

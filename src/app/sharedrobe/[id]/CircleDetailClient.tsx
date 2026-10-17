@@ -701,7 +701,7 @@ export default function CircleDetailClient({
                     </h2>
                   </div>
                   <span className="font-mono text-[10px] text-dusty-lilac font-bold">
-                    Tap available item to borrow ✨
+                    Tap item to open ✨
                   </span>
                 </div>
 
@@ -840,10 +840,25 @@ export default function CircleDetailClient({
                                   Dibs Requested
                                 </span>
                               ) : isAvailable ? (
-                                <span className="inline-flex w-full items-center justify-center gap-1 rounded-lg bg-french-navy py-1.5 font-mono text-[10px] font-bold text-white shadow-2xs transition group-hover:bg-french-navy-hover">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setBorrowModalItem({
+                                      id: item.id,
+                                      title: item.title,
+                                      category: item.category,
+                                      image_url: item.image_url,
+                                      owner_id: item.owner_id,
+                                      ownerName: item.ownerName,
+                                      status: item.status,
+                                    });
+                                  }}
+                                  className="inline-flex w-full items-center justify-center gap-1 rounded-lg bg-french-navy py-1.5 font-mono text-[10px] font-bold text-white shadow-2xs transition hover:bg-french-navy-hover active:scale-95"
+                                >
                                   <Sparkles className="h-3 w-3 text-dusty-lilac" />
-                                  Borrow This Look
-                                </span>
+                                  <span>Borrow This Item</span>
+                                </button>
                               ) : (
                                 <span className="inline-flex w-full items-center justify-center rounded-lg bg-buttercream py-1.5 font-mono text-[10px] font-semibold text-muted">
                                   Currently {item.status}
