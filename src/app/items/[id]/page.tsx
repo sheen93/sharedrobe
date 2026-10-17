@@ -10,10 +10,18 @@ export const dynamic = "force-dynamic";
 
 interface ItemPageProps {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ from?: string }>;
 }
 
-export default async function ItemDetailPage({ params }: ItemPageProps) {
+export default async function ItemDetailPage({
+  params,
+  searchParams,
+}: ItemPageProps) {
   const { id } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const rawFrom = resolvedSearchParams?.from || "";
+  const backHref =
+    rawFrom.startsWith("/") && !rawFrom.startsWith("//") ? rawFrom : "/";
 
   if (!isValidUuid(id)) {
     notFound();
@@ -148,6 +156,7 @@ export default async function ItemDetailPage({ params }: ItemPageProps) {
       friends={friendsList}
       isOwner={isOwner}
       currentUserId={user.id}
+      backHref={backHref}
     />
   );
 }

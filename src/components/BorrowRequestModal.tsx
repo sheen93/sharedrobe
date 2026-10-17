@@ -156,7 +156,7 @@ export default function BorrowRequestModal({
               Owned by <strong className="text-midnight-slate">{item.ownerName}</strong>
             </p>
             <Link
-              href={`/items/${item.id}`}
+              href={`/items/${item.id}?from=/sharedrobe/${circleId}`}
               className="mt-1.5 inline-flex items-center gap-1 font-mono text-[10px] font-bold text-french-navy underline-offset-2 hover:text-dusty-lilac hover:underline"
             >
               <span>Inspect full item details</span>

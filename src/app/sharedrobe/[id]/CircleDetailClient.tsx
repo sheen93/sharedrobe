@@ -272,7 +272,7 @@ export default function CircleDetailClient({
       return;
     }
 
-    router.push(`/items/${item.id}`);
+    router.push(`/items/${item.id}?from=/sharedrobe/${circle.id}`);
   };
 
   return (
@@ -818,7 +818,7 @@ export default function CircleDetailClient({
 
                             {/* Direct Link to Item Detail Top-Right */}
                             <Link
-                              href={`/items/${item.id}`}
+                              href={`/items/${item.id}?from=/sharedrobe/${circle.id}`}
                               onClick={(e) => e.stopPropagation()}
                               className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-buttercream/90 text-midnight-slate shadow-xs transition hover:bg-french-navy hover:text-white"
                               title="Inspect item page"
@@ -943,7 +943,7 @@ export default function CircleDetailClient({
                               <Link
                                 href={
                                   act.target_item_id
-                                    ? `/items/${act.target_item_id}`
+                                    ? `/items/${act.target_item_id}?from=/sharedrobe/${circle.id}`
                                     : "#"
                                 }
                                 className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border-2 border-white/60 bg-buttercream shadow-sm transition hover:scale-105"
@@ -985,7 +985,7 @@ export default function CircleDetailClient({
                             <Link
                               href={
                                 act.target_item_id
-                                  ? `/items/${act.target_item_id}`
+                                  ? `/items/${act.target_item_id}?from=/sharedrobe/${circle.id}`
                                   : "#"
                               }
                               className="h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-border-strong bg-buttercream"

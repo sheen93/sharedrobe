@@ -673,7 +673,7 @@ export default function SharedrobeClient({
                               {circleItems.map((item) => (
                                 <Link
                                   key={item.id}
-                                  href={`/items/${item.id}`}
+                                  href={`/items/${item.id}?from=/sharedrobe`}
                                   className="group flex flex-col overflow-hidden rounded-xl border border-border-neutral bg-chalk shadow-xs transition hover:border-french-navy hover:shadow-sm"
                                 >
                                   <div className="relative aspect-square w-full bg-buttercream overflow-hidden">

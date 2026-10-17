@@ -28,8 +28,10 @@ interface DbMemberRow {
 
 interface DbCircleItemRow {
   id: string;
+  circle_id: string;
   item_id: string;
   shared_by: string;
+  sharer: { id: string; full_name: string | null; email: string } | null;
   items: {
     id: string;
     title: string;
@@ -39,7 +41,6 @@ interface DbCircleItemRow {
     owner_id: string;
     status: string | null;
     borrowed_by: string | null;
-    owner: { id: string; full_name: string | null; email: string } | null;
     borrower: { id: string; full_name: string | null; email: string } | null;
   } | null;
 }
@@ -125,10 +126,10 @@ export default async function CircleDetailPage({
 
   // 2. Fetch approved circle members, shared items, pending borrow requests, and chronological circle_activity in parallel
   const [
-    { data: memberRowsData },
-    { data: circleItemsData },
-    { data: borrowRequestsData },
-    { data: activityRowsData },
+    { data: memberRowsData, error: memberErr },
+    { data: circleItemsData, error: circleItemsErr },
+    { data: borrowRequestsData, error: borrowRequestsErr },
+    { data: activityRowsData, error: activityErr },
   ] = await Promise.all([
     supabase
       .from("circle_members")
@@ -151,8 +152,14 @@ export default async function CircleDetailPage({
       .from("circle_items")
       .select(`
         id,
+        circle_id,
         item_id,
         shared_by,
+        sharer:shared_by (
+          id,
+          full_name,
+          email
+        ),
         items:item_id (
           id,
           title,
@@ -162,11 +169,6 @@ export default async function CircleDetailPage({
           owner_id,
           status,
           borrowed_by,
-          owner:owner_id (
-            id,
-            full_name,
-            email
-          ),
           borrower:borrowed_by (
             id,
             full_name,
@@ -227,6 +229,19 @@ export default async function CircleDetailPage({
       .limit(40),
   ]);
 
+  if (memberErr) {
+    console.error("[CircleDetailPage] Error fetching circle_members:", memberErr);
+  }
+  if (circleItemsErr) {
+    console.error("[CircleDetailPage] Error fetching circle_items:", circleItemsErr);
+  }
+  if (borrowRequestsErr) {
+    console.error("[CircleDetailPage] Error fetching borrow_requests:", borrowRequestsErr);
+  }
+  if (activityErr) {
+    console.error("[CircleDetailPage] Error fetching circle_activity:", activityErr);
+  }
+
   // Format members list (also build a profile lookup map for item owners)
   const memberRows = (memberRowsData as unknown as DbMemberRow[]) || [];
   const profileNameMap = new Map<string, { fullName: string; email: string }>();
@@ -260,13 +275,15 @@ export default async function CircleDetailPage({
     if (row.items && !Array.isArray(row.items)) {
       const rawItem = row.items;
       const fallbackOwner = profileNameMap.get(rawItem.owner_id);
+      const sharerProfile =
+        row.sharer && row.shared_by === rawItem.owner_id ? row.sharer : null;
       const ownerName =
-        rawItem.owner?.full_name ||
         fallbackOwner?.fullName ||
-        rawItem.owner?.email ||
+        sharerProfile?.full_name ||
+        sharerProfile?.email?.split("@")[0] ||
         "Circle Member";
       const ownerEmail =
-        rawItem.owner?.email || fallbackOwner?.email || "";
+        fallbackOwner?.email || sharerProfile?.email || "";
 
       items.push({
         id: rawItem.id,

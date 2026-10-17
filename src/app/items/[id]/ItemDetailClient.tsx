@@ -57,12 +57,14 @@ interface ItemDetailClientProps {
   friends: FriendOption[];
   isOwner: boolean;
   currentUserId: string;
+  backHref?: string;
 }
 
 export default function ItemDetailClient({
   item,
   friends,
   isOwner,
+  backHref = "/",
 }: ItemDetailClientProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -159,6 +161,26 @@ export default function ItemDetailClient({
     });
   };
 
+  // Navigate back to the previous screen (e.g. Circle Closet, ShareDrobe, or MyDrobe)
+  const handleBack = () => {
+    if (backHref && backHref !== "/") {
+      router.push(backHref);
+      return;
+    }
+
+    if (
+      typeof window !== "undefined" &&
+      window.history.length > 1 &&
+      document.referrer &&
+      document.referrer.startsWith(window.location.origin)
+    ) {
+      router.back();
+      return;
+    }
+
+    router.push("/");
+  };
+
   // Delete Garment
   const handleConfirmDelete = () => {
     if (!isOwner || isPending) return;
@@ -170,7 +192,7 @@ export default function ItemDetailClient({
 
       if (res.success) {
         setIsDeleteModalOpen(false);
-        router.push("/");
+        router.push(backHref || "/");
       } else {
         showFeedback("error", res.error);
         setIsDeleteModalOpen(false);
@@ -204,13 +226,14 @@ export default function ItemDetailClient({
           {/* Screen Header with back link */}
         <header className="flex items-center justify-between border-b border-border-neutral px-1 pt-1 pb-3">
           <div className="flex items-center gap-2.5">
-            <Link
-              href="/"
+            <button
+              type="button"
+              onClick={handleBack}
               className="flex h-8 w-8 items-center justify-center rounded-xl border border-border-neutral bg-chalk text-french-navy transition hover:bg-border-neutral active:scale-95"
-              aria-label="Back to wardrobe"
+              aria-label="Go back"
             >
               <ArrowLeft size={16} />
-            </Link>
+            </button>
             <div>
               <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-dusty-lilac">
                 WARDROBE // DETAIL
