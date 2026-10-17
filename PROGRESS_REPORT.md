@@ -2,8 +2,8 @@
 
 > **Document Type:** Multi-Agent System Handoff & System State Blueprint  
 > **Repository:** `sheen93/sharedrobe`  
-> **Last Updated:** October 17, 2026 (Local Time: 02:10 EDT)  
-> **Current Stable Commit on `main`:** `feat/sprint2-item-management`  
+> **Last Updated:** October 17, 2026 (Local Time: 14:45 EDT)  
+> **Current Active Branch:** `feat/sprint3-circle-engine` (Sprint 3 Complete & Verified)  
 > **Active Environment:** Next.js 16.3.5 (App Router, Turbopack) / React 19 / TypeScript 5 / Tailwind CSS v4 / Supabase (@supabase/ssr)
 
 ---
@@ -226,7 +226,7 @@ This document serves as an exhaustive, definitive record of every engineering de
 
 ---
 
-### Milestone 8: Sprint 3 Circle Engine — Borrow Requests, Member Drawers & The Drama Feed (`feat/sprint3-circle-engine`)
+### Milestone 8: Sprint 3 Circle Engine — Borrow Requests, Member Drawers, Drama Feed & UX Refinements (`feat/sprint3-circle-engine`)
 - **Part 1: Database Architecture & Circle Activity RLS (`supabase/migrations/20261018000000_sprint3_circles.sql`):**
   - Added ENUMs `borrow_request_status` (`pending`, `approved`, `rejected`, `returned`) and `circle_activity_type` (`shared_item`, `borrowed_item`, `public_nudge`).
   - Added `SECURITY DEFINER` helper `public.is_item_owner(lookup_item_id, lookup_user_id)` to prevent recursive RLS checks.
@@ -234,15 +234,26 @@ This document serves as an exhaustive, definitive record of every engineering de
   - Created `public.circle_activity` with chronological index `(circle_id, created_at DESC)` and circle-member RLS visibility.
 - **Part 2: Server Actions & Resend Nudge Integration (`src/app/sharedrobe/actions.ts`, `constants.ts`, `src/utils/email/resend.ts`):**
   - Created `src/app/sharedrobe/constants.ts` with `BORROW_DURATION_OPTIONS`, `isValidBorrowDuration`, `isValidNudgeType`, and `formatPublicNudgeMessage`.
-  - Built `createBorrowRequest(itemId, circleId, durationIntent)`, `approveBorrowRequest(requestId)`, `rejectBorrowRequest(requestId)`, `nudgeReturn(itemId, type: 'private' | 'public')`, and `removeCircleMember(circleId, memberId)`.
+  - Built `createBorrowRequest(itemId, circleId, durationIntent)`, `approveBorrowRequest(requestId)`, `rejectBorrowRequest(requestId)`, `nudgeReturn(itemId, type: 'private' | 'public')`, `removeCircleMember(circleId, memberId)`, and `leaveCircle(circleId)`.
   - Added `sendReturnNudgeEmail` and `sendBorrowRequestEmail` to `src/utils/email/resend.ts`.
 - **Part 3: Circle Detail Route, Member Drawers & Borrow Request Modal (`src/app/sharedrobe/[id]/page.tsx`, `CircleDetailClient.tsx`, `src/components/BorrowRequestModal.tsx`):**
   - Built SSR Circle Detail route prefetching members, garments, borrow requests, and chronological activity feed.
   - Built horizontal scrollable Member Closet Drawers filtering garments by owner, with an `Admin ▾` dropdown on member avatars to `Remove Member`.
-  - Built `<BorrowRequestModal />` enforcing the 4 mandatory playful duration options.
+  - Built `<BorrowRequestModal />` enforcing the 4 mandatory playful duration options: `"Just for the weekend"`, `"A couple of weeks"`, `"Until you notice it's missing"`, and `"Infinity (It looks better on me anyway)"`.
 - **Part 4: The Drama Feed & Lender Controls (`CircleDetailClient.tsx` & `src/app/items/[id]/ItemDetailClient.tsx`):**
   - Added segmented `Closet Racks` vs `Activity & Drama` view inside the Circle Detail screen, styling `'public_nudge'` events as bold Dusty Lilac siren call-out cards.
   - Added Lender Controls (`Ask for it back` button + modal offering `'Keep it Private (Email)'` vs `'Create Drama (Public Call-out)'`) on `ItemDetailClient.tsx` whenever an item is `'Lent Out'`.
+- **Part 5: Post-Sprint 3 Bug Fixes & UX Refinements (`460cfd6`, `6745ec4`, `00ade17`):**
+  - **PostgREST Circle Items Fix (`src/app/sharedrobe/[id]/page.tsx`):** Fixed Circle Closet showing 0 items due to PostgREST error `PGRST200` when attempting `owner:owner_id (id, full_name, email)` inside `items:item_id` (since `items.owner_id` references `auth.users(id)` rather than `public.profiles(id)`). Resolved owner names via `sharer:shared_by` and `profileNameMap`.
+  - **Context-Aware Back Button (`src/app/items/[id]/page.tsx`, `ItemDetailClient.tsx`):** Added `?from=/sharedrobe/...` query parameter support (`backHref`) + smart `handleBack` fallback (`router.push(backHref)` or `router.back()`) so navigating back from an item opened inside a Circle returns to the Circle Closet rather than MyDrobe home (`/`).
+  - **Dual Borrow Entry Points (`CircleDetailClient.tsx`, `ItemDetailClient.tsx`):**
+    1. Tapping a garment card anywhere inside a Circle navigates directly to `/items/${item.id}?from=/sharedrobe/${circle.id}` (header prompt updated to `"Tap item to open ✨"`).
+    2. Clicking the standalone French Navy **`Borrow This Item`** button at the bottom of an available non-owner garment card (`e.stopPropagation()`) opens `<BorrowRequestModal />` right on the Circle Closet page.
+    3. Inside `/items/[id]`, non-owners also have a full-width **`Request to Borrow Item`** button at the bottom of the page (in the exact slot where owners see `"Delete Garment from Closet"`), which triggers `<BorrowRequestModal />` or displays `"Borrow Request Pending (...) ✨"`.
+  - **Compact Member Avatar Bar & Leave Circle (`src/app/sharedrobe/page.tsx`, `SharedrobeClient.tsx`, `actions.ts`):**
+    - Expanding a circle card on `/sharedrobe` now shows a clean row of **small round member profile avatars** (garments remain inside `/sharedrobe/[id]`).
+    - Circle Admins can click **`+ Add Friends`** or remove non-admin members directly from their avatar pill.
+    - Non-admin members can click **`Leave Circle`** (with confirmation dialog calling `leaveCircle(circleId)`).
 - **QA Verification & Edge Case Matrix:**
   - Expanded `scripts/test-social-actions-edge-cases.mjs` with Section 7 (7 new tests `7A`–`7G`).
   - Total automated tests increased from 40 to 47 passing tests (14 upload + 33 social/items/borrow/drama).
@@ -258,7 +269,7 @@ sharedrobe/
 ├── docs/
 │   └── AUTH.md                     # Supabase authentication & deployment guide
 ├── scripts/
-│   ├── test-social-actions-edge-cases.mjs # QA Advocate social & items edge-case test suite (26 tests)
+│   ├── test-social-actions-edge-cases.mjs # QA Advocate social, items & borrow test suite (33 tests)
 │   ├── test-upload-edge-cases.mjs  # QA Advocate automated edge-case test suite (14 tests)
 │   └── validate-and-pr.sh          # CI pre-PR pipeline (lint -> typecheck -> test -> build -> push)
 ├── src/
@@ -266,8 +277,8 @@ sharedrobe/
 │   │   ├── auth/confirm/route.ts   # Supabase email confirmation callback (PKCE + token_hash)
 │   │   ├── items/
 │   │   │   ├── [id]/
-│   │   │   │   ├── page.tsx        # SSR item detail prefetching owner, borrower, and friends
-│   │   │   │   └── ItemDetailClient.tsx # Full-bleed image card, 3-way status toggle, 7-tag selector, delete modal
+│   │   │   │   ├── page.tsx        # SSR item detail prefetching owner, borrower, friends & borrow context
+│   │   │   │   └── ItemDetailClient.tsx # Full-bleed item card, status/tag controls, lender nudge & borrower CTA
 │   │   │   ├── actions.ts          # Server actions: updateItemStatus, updateItemTags, deleteItem
 │   │   │   └── constants.ts        # Item statuses, tag constraints, UUID/storage helpers (Turbopack safe)
 │   │   ├── login/
@@ -278,9 +289,13 @@ sharedrobe/
 │   │   │   ├── page.tsx            # Server Component fetching authenticated user
 │   │   │   └── ProfileClient.tsx   # Interactive profile form with password modal trigger
 │   │   ├── sharedrobe/
-│   │   │   ├── actions.ts          # Phase 2 Server actions (friends, circles, item sharing, add friends)
-│   │   │   ├── page.tsx            # Community Hub SSR Server Component prefetching circles & friends
-│   │   │   └── SharedrobeClient.tsx # 3-tab UI: My Circles, My Friends, Real-Time Search & Pending Requests
+│   │   │   ├── [id]/
+│   │   │   │   ├── page.tsx        # Circle Detail SSR page prefetching members, garments, requests & drama feed
+│   │   │   │   └── CircleDetailClient.tsx # Member drawers, garment racks, standalone borrow CTA & Drama Feed
+│   │   │   ├── actions.ts          # Social & Circle Server actions (friends, circles, borrow, nudge, leave/remove)
+│   │   │   ├── constants.ts        # Borrow duration options, nudge validators & formatters (Turbopack safe)
+│   │   │   ├── page.tsx            # Community Hub SSR Server Component prefetching circles, members & friends
+│   │   │   └── SharedrobeClient.tsx # 3-tab UI: My Circles (round member avatars, admin/leave controls), Friends, Search
 │   │   ├── globals.css             # Tailwind v4 @theme design tokens (Parisian Navy & Dusty Lilac)
 │   │   ├── layout.tsx              # Root HTML shell with typography & viewport settings
 │   │   ├── page.tsx                # Server Component: authenticates & prefetches MyDrobe items via SSR
@@ -295,7 +310,8 @@ sharedrobe/
 │   │   │   └── SubmitButton.tsx    # Accessible CTA button with pending loader (useFormStatus)
 │   │   ├── AddFriendsToCircleModal.tsx # Modal for adding members from friends list into a circle
 │   │   ├── AddItemModal.tsx        # Camera/upload modal with compression & error handling
-│   │   ├── BottomNav.tsx           # Floating Parisian Navy 3-tab pill (MyDrobe, ShareDrobe, Profile)
+│   │   ├── BottomNav.tsx           # Docked Parisian Navy 3-tab navigation bar (MyDrobe, ShareDrobe, Profile)
+│   │   ├── BorrowRequestModal.tsx  # Playful borrow request modal with 4 mandatory duration options
 │   │   ├── CreateCircleModal.tsx   # Modal for creating new wardrobe circles
 │   │   └── ShareItemModal.tsx      # Modal for sharing garments into approved circles
 │   ├── proxy.ts                    # Next.js 16 route proxy (middleware replacement)
@@ -315,10 +331,11 @@ sharedrobe/
 │       └── upload-errors.ts        # Category enum definitions & error resolution logic
 ├── supabase/
 │   └── migrations/
-│       ├── 20261012000000_auth_owner_rls.sql     # Baseline owner_id column & RLS setup
-│       ├── 20261012000001_rls_insert_policy.sql  # Strict RLS (auth.uid() = owner_id) & Storage policies
-│       ├── 20261016000000_phase2_social.sql      # Phase 2 Social Engine: profiles, circles, friends, RLS
-│       └── 20261017000000_sprint2_item_management.sql # Sprint 2: item_status ENUM, borrowed_by, tags constraint
+│       ├── 20261012000000_auth_owner_rls.sql          # Baseline owner_id column & RLS setup
+│       ├── 20261012000001_rls_insert_policy.sql       # Strict RLS (auth.uid() = owner_id) & Storage policies
+│       ├── 20261016000000_phase2_social.sql           # Phase 2 Social Engine: profiles, circles, friends, RLS
+│       ├── 20261017000000_sprint2_item_management.sql # Sprint 2: item_status ENUM, borrowed_by, tags constraint
+│       └── 20261018000000_sprint3_circles.sql         # Sprint 3: borrow_requests, circle_activity, RLS policies
 ├── next.config.ts                  # Allowed dev origins (192.168.1.153, 192.168.*.*, etc.) for mobile LAN dev
 ├── package.json                    # Scripts & dependencies
 └── tsconfig.json                   # Strict TypeScript compiler options
@@ -358,14 +375,16 @@ create table public.items (
   title text not null,
   image_url text not null,
   tags text[] default array[]::text[],
+  status public.item_status not null default 'Available', -- ENUM ('Available','Lent Out','In Laundry')
+  borrowed_by uuid references public.profiles(id) on delete set null,
   is_sharable boolean default true,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 ```
 
 ### 5.2 Strict Row-Level Security (RLS)
-The active migration is `supabase/migrations/20261012000001_rls_insert_policy.sql`:
-- **SELECT:** `USING (auth.uid() = owner_id)` (Strictly scoped to the item owner).
+The active migrations scope `public.items` access to owners and approved circle members:
+- **SELECT:** `USING (auth.uid() = owner_id OR public.is_item_shared_with_user(id, auth.uid()))`.
 - **INSERT:** `WITH CHECK (auth.uid() = owner_id)` (Users can only write items with their own user ID).
 - **UPDATE:** `USING (auth.uid() = owner_id) WITH CHECK (auth.uid() = owner_id)`.
 - **DELETE:** `USING (auth.uid() = owner_id)`.
@@ -429,15 +448,37 @@ create table public.circle_items (
 );
 ```
 
+### 5.5 Sprint 3 Circle Engine Schema (`20261018000000_sprint3_circles.sql`)
+```sql
+-- borrow_requests
+create table public.borrow_requests (
+  id uuid primary key default gen_random_uuid(),
+  item_id uuid not null references public.items(id) on delete cascade,
+  requester_id uuid not null references public.profiles(id) on delete cascade,
+  circle_id uuid not null references public.circles(id) on delete cascade,
+  status public.borrow_request_status not null default 'pending', -- 'pending','approved','rejected','returned'
+  duration_intent text not null check (char_length(trim(duration_intent)) > 0),
+  created_at timestamptz default timezone('utc'::text, now()) not null
+);
+
+-- circle_activity (The Drama Feed)
+create table public.circle_activity (
+  id uuid primary key default gen_random_uuid(),
+  circle_id uuid not null references public.circles(id) on delete cascade,
+  actor_id uuid not null references public.profiles(id) on delete cascade,
+  action_type public.circle_activity_type not null, -- 'shared_item','borrowed_item','public_nudge'
+  target_item_id uuid references public.items(id) on delete set null,
+  message text,
+  created_at timestamptz default timezone('utc'::text, now()) not null
+);
+```
+
 #### Anti-Recursion Security Definer Functions:
-In Postgres/Supabase, querying `circle_members` within a `circle_members` policy creates infinite recursion (`42P17`). This is resolved using `SECURITY DEFINER` functions with fixed search paths:
+In Postgres/Supabase, querying `circle_members` or `items` within nested policies creates infinite recursion (`42P17`). This is resolved using `SECURITY DEFINER` functions with fixed search paths:
 - `public.is_circle_admin(check_circle_id uuid, check_user_id uuid) returns boolean`
 - `public.is_circle_member(check_circle_id uuid, check_user_id uuid) returns boolean`
 - `public.is_item_shared_with_user(check_item_id uuid, check_user_id uuid) returns boolean`
-
-#### Circle-Aware Garment RLS:
-`public.items` policy `items_select_owner_or_circle_policy`:
-- Garments are visible to their owner (`auth.uid() = owner_id`) OR any user where `public.is_item_shared_with_user(id, auth.uid())` returns true.
+- `public.is_item_owner(lookup_item_id uuid, lookup_user_id uuid) returns boolean`
 
 ---
 
@@ -447,7 +488,7 @@ Run all checks locally with:
 ```bash
 npm run lint         # ESLint 9 (0 errors, 0 warnings)
 npm run typecheck    # TypeScript 5 (No type errors)
-npm test             # QA Advocate unified test suites (40 passing tests)
+npm test             # QA Advocate unified test suites (47 passing tests)
 npm run build        # Next.js 16 Turbopack build (All routes compiled)
 ```
 
@@ -506,8 +547,15 @@ npm run build        # Next.js 16 Turbopack build (All routes compiled)
   ✅ [PASS] 6E: Item borrower reference is strictly cleared to null when status is not 'Lent Out'
   ✅ [PASS] 6F: Tag validation strictly validates against the 7 allowed tag categories
   ✅ [PASS] 6G: Storage deletion path validation prevents cross-user file deletion attacks
+  ✅ [PASS] 7A: Borrow duration validation accepts exact 4 playful options and rejects arbitrary strings
+  ✅ [PASS] 7B: Nudge type validation strictly accepts only 'private' and 'public'
+  ✅ [PASS] 7C: Public nudge message formatter produces playful call-out with borrower name and item title
+  ✅ [PASS] 7D: Self-borrowing check blocks owners from requesting their own items
+  ✅ [PASS] 7E: Admin self-removal guard blocks circle admins from removing themselves
+  ✅ [PASS] 7F: Return nudge email safely escapes HTML in borrower, owner, and garment titles
+  ✅ [PASS] 7G: Borrow request email safely escapes HTML in requester, circle, garment, and duration strings
 ==================================================
-🎉 All 26 Social Engine, Circle Friends, Items & Storage tests PASSED!
+🎉 All 33 Social Engine, Circle Friends, Items, Storage & Sprint 3 Drama tests PASSED!
 ```
 
 ---
@@ -520,15 +568,17 @@ For any developer or agent running this repository on a fresh Supabase project:
    ```env
    NEXT_PUBLIC_SUPABASE_URL=https://<your-project-id>.supabase.co
    NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
-   RESEND_API_KEY=re_... # Optional: transactional emails for friend/circle requests
+   RESEND_API_KEY=re_... # Optional: transactional emails for friend/circle/borrow/nudge requests
    ```
 2. **Execute Migrations in SQL Editor:**
    - Run `supabase/migrations/20261012000000_auth_owner_rls.sql`
    - Run `supabase/migrations/20261012000001_rls_insert_policy.sql`
    - Run `supabase/migrations/20261016000000_phase2_social.sql`
    - Run `supabase/migrations/20261017000000_sprint2_item_management.sql`
+   - Run `supabase/migrations/20261018000000_sprint3_circles.sql`
    - Confirm that the `item_category` enum contains: `Tops`, `Bottoms`, `Dresses`, `Outerwear`, `Shoes`, `Bags`, `Accessories`.
    - Confirm that the `item_status` enum contains: `Available`, `Lent Out`, `In Laundry`.
+   - Confirm that `borrow_request_status` and `circle_activity_type` enums and `borrow_requests` / `circle_activity` tables exist.
 3. **Storage Bucket Configuration:**
    - In Supabase Dashboard -> **Storage** -> **Buckets**, confirm bucket `wardrobe` is created and toggled to **Public**.
 4. **Authentication Settings:**
@@ -549,16 +599,18 @@ The following tasks are prioritized for the next development sprints:
 - Delivered in Phase 2 (`feat/phase2-friends-and-circles`) and Milestone 6 (`feat/add-friends-to-circle`).
 
 ### Sprint 2: Wardrobe Item Management & Item Detail View — [COMPLETED]
-- **Delivered in Sprint 2 (`feat/sprint2-item-management`):**
-  - Database schema & constraints (`item_status` ENUM, `borrowed_by`, tags check constraint).
-  - Storage deletion cleanup + typed Server Actions (`updateItemStatus`, `updateItemTags`, `deleteItem`).
-  - Next.js dynamic SSR route `/items/[id]` and `ItemDetailClient.tsx` with Stitch design tokens.
-  - Interactive 7-tag selector, 3-way status toggle, conditional friend borrower selector.
-  - Delete modal with cloud storage object purge.
-  - Feed integration in MyDrobe & ShareDrobe with `<Link href={'/items/${item.id}'}>` and visual status badges ("Lent to [Friend]" in Dusty Lilac, "In Laundry" in Amber).
-  - 40 automated edge-case test validations.
+- Delivered in Sprint 2 (`feat/sprint2-item-management`).
 
-### Sprint 3: Lookbook Builder ("Fav Outfit")
+### Sprint 3: Circle Engine — Borrow Requests, Member Drawers & The Drama Feed — [COMPLETED]
+- **Delivered in Sprint 3 (`feat/sprint3-circle-engine`):**
+  - `borrow_requests` and `circle_activity` tables with anti-recursion RLS policies.
+  - Server actions for borrowing (`createBorrowRequest`, `approveBorrowRequest`, `rejectBorrowRequest`), returning/nudging (`nudgeReturn` private email + public drama call-out), and membership (`removeCircleMember`, `leaveCircle`).
+  - Dedicated Circle Closet Detail route (`/sharedrobe/[id]`) with horizontal member avatar drawers, standalone `"Borrow This Item"` button on available cards, and chronological `"Activity & Drama"` feed.
+  - Item Detail page (`/items/[id]`) integration with context-aware Back navigation (`?from=...`), Lender Controls (`"Ask for it back"` modal), and non-owner `"Request to Borrow Item"` bottom action button.
+  - Compact round member avatars with Admin Add/Remove and Member Leave controls on `/sharedrobe`.
+  - 47 automated QA edge-case tests passing.
+
+### Sprint 4: Lookbook Builder ("Fav Outfit")
 - **Fav Outfit Feature:**
   - Multi-item pairing engine linking a `Top` and `Bottom` (or `Dress` + `Accessories`) into a curated lookbook card matching the Dusty Lilac folder styling in the Stitch mockups.
 
@@ -705,7 +757,7 @@ The Gated Workflow Protocol is the strict operational procedure governing every 
 
 ### 9.4 Real-World Case Studies & Architectural Solutions
 
-The following four case studies illustrate how the multi-agent team collaborated across Sprints 1 and 2 to solve complex bugs and architectural challenges:
+The following five case studies illustrate how the multi-agent team collaborated across Sprints 1, 2, and 3 to solve complex bugs and architectural challenges:
 
 #### Case Study 1: Plural Postgres ENUM Alignment Bug
 - **Issue:** Garment uploads were failing with Postgres error code `22P02` (`invalid input value for enum item_category`).
@@ -715,15 +767,15 @@ The following four case studies illustrate how the multi-agent team collaborated
 
 #### Case Study 2: Next.js 16 Turbopack Server Action Segregation
 - **Issue:** After introducing `src/app/items/actions.ts`, Next.js 16 Turbopack crashed with the error:
-  `"Only async functions are allowed to be exported in a 'use server' file."`
+   `"Only async functions are allowed to be exported in a 'use server' file."`
 - **Diagnosis (LeadArchitect):** `actions.ts` had exported non-async constant arrays (`ALLOWED_ITEM_STATUSES`, `ALLOWED_ITEM_TAGS`) and helper functions (`extractStoragePath`, `isValidUuid`). Next.js 16 strictly disallows exporting non-async functions or values from Server Action modules.
-- **Resolution (BackendEngineer):** Created `src/app/items/constants.ts` to house all static constants, TypeScript types, and synchronous pure helpers. `actions.ts` now strictly contains async Server Actions.
+- **Resolution (BackendEngineer):** Created `src/app/items/constants.ts` (and later `src/app/sharedrobe/constants.ts` in Sprint 3) to house all static constants, TypeScript types, and synchronous pure helpers. `actions.ts` files strictly contain async Server Actions.
 - **Verification (DevopsSreSpecialist + QA_Advocate):** Ran `npm run build` with Turbopack compiler — compiled cleanly with 0 route compilation errors.
 
 #### Case Study 3: Mobile Bottom Navigation Occlusion Fix
 - **Issue:** On the item detail page (`/items/[id]`) and home wardrobe feed (`/`), users reported that the "Delete Garment from Closet" button and bottom wardrobe cards were obscured by the bottom navigation bar.
 - **Diagnosis (ProductDesigner + FrontendEngineer):** `BottomNav.tsx` was implemented as a floating overlay capsule using `fixed bottom-3 left-4 right-4 z-40`. On mobile browsers with bottom URL bars, the floating nav covered up interactive buttons and content at the bottom of the scroll container.
-- **Resolution (FrontendEngineer):** Converted `BottomNav` into a docked sticky component (`sticky bottom-0 w-full sm:rounded-b-[31px] z-40 bg-buttercream/95 backdrop-blur-md border-t border-border-neutral`). Standardized an inner scroll wrapper (`pb-8 sm:pb-8`) across all main views (`MyDrobeClient`, `ItemDetailClient`, `SharedrobeClient`, `ProfileClient`).
+- **Resolution (FrontendEngineer):** Converted `BottomNav` into a docked sticky component (`sticky bottom-0 w-full sm:rounded-b-[31px] z-40 bg-buttercream/95 backdrop-blur-md border-t border-border-neutral`). Standardized an inner scroll wrapper (`pb-8 sm:pb-8`) across all main views (`MyDrobeClient`, `ItemDetailClient`, `SharedrobeClient`, `CircleDetailClient`, `ProfileClient`).
 - **Verification (QA_Advocate):** Inspected mobile layout geometry — navigation is now docked cleanly at the bottom of the card with zero occlusion of the Delete button or feed items.
 
 #### Case Study 4: Storage Deletion Security & Ownership Validation
@@ -736,6 +788,12 @@ The following four case studies illustrate how the multi-agent team collaborated
   4. Enforces path prefix validation: confirms that the path strictly starts with `${user.id}/`, completely preventing cross-user file deletion attacks.
   5. Purges the file from the `wardrobe` storage bucket first, and only then deletes the database row.
 - **Verification (QA_Advocate):** Wrote Section 6 tests in `scripts/test-social-actions-edge-cases.mjs` verifying storage path extraction, signed token stripping, foreign domain rejection, and cross-user deletion blocking.
+
+#### Case Study 5: PostgREST Foreign Key Target Schema Gotcha (`items.owner_id`)
+- **Issue:** In Sprint 3, the Circle Closet page (`/sharedrobe/[id]`) displayed `0 items` even when garments were shared into the circle.
+- **Diagnosis (LeadArchitect + BackendEngineer):** `public.items.owner_id` references `auth.users(id)` (in the non-exposed `auth` schema), whereas `circle_items.shared_by` and `items.borrowed_by` reference `public.profiles(id)` (in the `public` schema). Attempting a nested PostgREST join `owner:owner_id (id, full_name, email)` inside `items:item_id (...)` threw `PGRST200` (could not find a foreign key relationship between `items.owner_id` and `public.profiles`) and caused the entire `circle_items` query to return `null`.
+- **Resolution (BackendEngineer):** Removed `owner:owner_id` from the nested `items:item_id` select in `src/app/sharedrobe/[id]/page.tsx` and instead resolved owner profile info from `sharer:shared_by (id, full_name, email)` and the circle's `profileNameMap`.
+- **Verification (QA_Advocate):** Circle Closet immediately hydrated all shared garments accurately with owner names and per-member drawer counts.
 
 ---
 
@@ -754,7 +812,7 @@ Before writing any new code, execute the full validation suite to verify that th
 ```bash
 npm run lint         # Must report 0 errors, 0 warnings
 npm run typecheck    # Must report 0 TypeScript errors
-npm test             # Must report 40/40 passing tests
+npm test             # Must report 47/47 passing tests
 npm run build        # Must compile all routes successfully with Turbopack
 ```
 
@@ -786,10 +844,11 @@ Follow the exact protocol sequence:
 ### Key Architectural Guardrails (Do Not Violate)
 
 1. **Category ENUMs Are Plural:** Never use singular category strings (`Top`, `Bottom`, `Dress`). The Postgres ENUM `item_category` strictly expects: `'Tops'`, `'Bottoms'`, `'Dresses'`, `'Outerwear'`, `'Shoes'`, `'Bags'`, `'Accessories'`.
-2. **Singleton Browser Client:** Never call `createBrowserClient` directly inside React components. Always import `createClient` from `@/utils/supabase/client` to use the shared singleton, preventing mobile `navigator.locks` token deadlocks.
-3. **SSR Data Prefetching:** Always prefetch initial data in Server Components (`page.tsx`) using `@/utils/supabase/server` with async `cookies()`. Pass preloaded items down to client components as initial props to ensure instant page load without spinners.
-4. **Server Actions File Purity:** Files with `"use server"` must export **only async functions**. Extract all constants, types, and synchronous helpers into separate non-server files (e.g., `constants.ts`).
-5. **Docked Navigation:** Never create a floating overlay bottom nav on mobile screens. Dock `BottomNav` inside the main container (`sticky bottom-0`) with bottom padding on the content wrapper to prevent covering CTAs.
-6. **Mandatory Edge Case Testing:** Every backend action or UI validation must have corresponding unit/integration edge-case tests in `scripts/test-*.mjs` integrated into `npm test`.
+2. **PostgREST `items.owner_id` Target Schema:** Never join `owner:owner_id (id, full_name, email)` inside `public.items` PostgREST queries because `items.owner_id` references `auth.users(id)` rather than `public.profiles(id)`. Resolve owner profiles via `public.profiles` or `circle_items.shared_by`.
+3. **Singleton Browser Client:** Never call `createBrowserClient` directly inside React components. Always import `createClient` from `@/utils/supabase/client` to use the shared singleton, preventing mobile `navigator.locks` token deadlocks.
+4. **SSR Data Prefetching:** Always prefetch initial data in Server Components (`page.tsx`) using `@/utils/supabase/server` with async `cookies()`. Pass preloaded items down to client components as initial props to ensure instant page load without spinners.
+5. **Server Actions File Purity:** Files with `"use server"` must export **only async functions**. Extract all constants, types, and synchronous helpers into separate non-server files (e.g., `constants.ts`).
+6. **Docked Navigation:** Never create a floating overlay bottom nav on mobile screens. Dock `BottomNav` inside the main container (`sticky bottom-0`) with bottom padding on the content wrapper to prevent covering CTAs.
+7. **Mandatory Edge Case Testing:** Every backend action or UI validation must have corresponding unit/integration edge-case tests in `scripts/test-*.mjs` integrated into `npm test`.
 
 
