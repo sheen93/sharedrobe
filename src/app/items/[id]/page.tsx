@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
-import { isValidUuid } from "@/app/items/actions";
+import { isValidUuid } from "@/app/items/constants";
 import ItemDetailClient, {
   type ItemDetailData,
   type FriendOption,

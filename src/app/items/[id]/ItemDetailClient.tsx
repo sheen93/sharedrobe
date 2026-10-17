@@ -20,10 +20,12 @@ import {
   updateItemStatus,
   updateItemTags,
   deleteItem,
+} from "@/app/items/actions";
+import {
   ALLOWED_ITEM_STATUSES,
   ALLOWED_ITEM_TAGS,
   type ItemStatus,
-} from "@/app/items/actions";
+} from "@/app/items/constants";
 
 export interface FriendOption {
   id: string;

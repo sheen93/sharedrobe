@@ -1255,16 +1255,5 @@ export async function addFriendsToCircle(
   };
 }
 
-export {
-  updateItemStatus,
-  updateItemTags,
-  deleteItem,
-  extractStoragePath,
-  ALLOWED_ITEM_STATUSES,
-  ALLOWED_ITEM_TAGS,
-  type ItemStatus,
-  type ItemTag,
-} from "@/app/items/actions";
-
 
 
