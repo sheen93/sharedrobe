@@ -12,6 +12,9 @@ interface DbItemWithShares {
   image_url: string;
   owner_id: string;
   created_at: string;
+  status: string | null;
+  borrowed_by: string | null;
+  borrower: { id: string; full_name: string | null; email: string } | null;
   circle_items: Array<{ circle_id: string }> | null;
 }
 
@@ -34,7 +37,14 @@ export default async function MyDrobePage() {
       tags,
       image_url,
       owner_id,
+      status,
+      borrowed_by,
       created_at,
+      borrower:borrowed_by (
+        id,
+        full_name,
+        email
+      ),
       circle_items (
         circle_id
       )
@@ -57,6 +67,9 @@ export default async function MyDrobePage() {
     owner_id: item.owner_id,
     created_at: item.created_at,
     sharedCirclesCount: (item.circle_items || []).length,
+    status: item.status || "Available",
+    borrowedBy: item.borrowed_by,
+    borrowerName: item.borrower?.full_name || item.borrower?.email || null,
   }));
 
   return <MyDrobeClient initialItems={initialItems} userId={user.id} />;

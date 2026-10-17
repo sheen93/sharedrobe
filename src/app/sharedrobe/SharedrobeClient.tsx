@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Share2,
@@ -39,6 +40,9 @@ export interface CircleItemPreview {
   category: string;
   image_url: string;
   owner_id: string;
+  status?: string;
+  borrowed_by?: string | null;
+  borrowerName?: string | null;
 }
 
 export interface UserCircleData {
@@ -652,25 +656,47 @@ export default function SharedrobeClient({
                           ) : (
                             <div className="grid grid-cols-3 gap-2">
                               {circleItems.map((item) => (
-                                <div
+                                <Link
                                   key={item.id}
-                                  className="flex flex-col overflow-hidden rounded-xl border border-border-neutral bg-chalk shadow-xs"
+                                  href={`/items/${item.id}`}
+                                  className="group flex flex-col overflow-hidden rounded-xl border border-border-neutral bg-chalk shadow-xs transition hover:border-french-navy hover:shadow-sm"
                                 >
-                                  <div className="relative aspect-square w-full bg-buttercream">
+                                  <div className="relative aspect-square w-full bg-buttercream overflow-hidden">
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img
                                       src={item.image_url}
                                       alt={item.title}
-                                      className="h-full w-full object-cover"
+                                      className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
                                     />
+
+                                    {/* Visual Status Badges if not Available */}
+                                    {item.status && item.status !== "Available" && (
+                                      <div className="absolute top-1 left-1 z-10">
+                                        <span
+                                          className={cn(
+                                            "inline-flex items-center gap-0.5 rounded px-1 py-0.2 font-mono text-[8px] font-bold shadow-2xs backdrop-blur-xs",
+                                            item.status === "Lent Out"
+                                              ? "bg-dusty-lilac/95 text-white"
+                                              : "bg-amber-500/95 text-white"
+                                          )}
+                                        >
+                                          {item.status === "Lent Out"
+                                            ? item.borrowerName
+                                              ? `Lent to ${item.borrowerName.split(" ")[0]}`
+                                              : "Lent Out"
+                                            : "Laundry"}
+                                        </span>
+                                      </div>
+                                    )}
+
                                     <span className="absolute bottom-1 right-1 rounded bg-french-navy/80 px-1 font-mono text-[8px] text-white">
                                       {item.category}
                                     </span>
                                   </div>
-                                  <p className="truncate p-1 text-[10px] font-bold text-midnight-slate">
+                                  <p className="truncate p-1 text-[10px] font-bold text-midnight-slate group-hover:text-french-navy transition-colors">
                                     {item.title}
                                   </p>
-                                </div>
+                                </Link>
                               ))}
                             </div>
                           )}

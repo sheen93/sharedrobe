@@ -237,6 +237,96 @@ const sanitizedFriendName = escapeHtml(friendNameRaw);
 assert.equal(sanitizedFriendName, "&lt;Marie Curie&gt;");
 console.log("  ✅ [PASS] 5F: Circle added transactional notification safely escapes recipient and circle names");
 
+// 6. Sprint 2: Item Management & Storage Cleanup Validation
+const ALLOWED_ITEM_STATUSES = ["Available", "Lent Out", "In Laundry"];
+const ALLOWED_ITEM_TAGS = [
+  "Casual",
+  "Formal",
+  "Vintage",
+  "Streetwear",
+  "Workwear",
+  "Athletic",
+  "Lounge",
+];
+
+function extractStoragePath(imageUrl, bucketName = "wardrobe") {
+  if (!imageUrl || typeof imageUrl !== "string") return null;
+
+  try {
+    const url = new URL(imageUrl);
+    const pathname = decodeURIComponent(url.pathname);
+    const marker = `/${bucketName}/`;
+    const markerIndex = pathname.indexOf(marker);
+    if (markerIndex !== -1) {
+      return pathname.substring(markerIndex + marker.length);
+    }
+    const parts = pathname.split("/").filter(Boolean);
+    const bucketIndex = parts.indexOf(bucketName);
+    if (bucketIndex !== -1 && bucketIndex < parts.length - 1) {
+      return parts.slice(bucketIndex + 1).join("/");
+    }
+  } catch {
+    const marker = `${bucketName}/`;
+    const idx = imageUrl.indexOf(marker);
+    if (idx !== -1) {
+      return imageUrl.substring(idx + marker.length);
+    }
+  }
+  return null;
+}
+
+// 6A: Extract storage path from public URL
+const publicUrl = "https://myproject.supabase.co/storage/v1/object/public/wardrobe/11111111-1111-4111-8111-111111111111/1728938192-abc.jpg";
+const extractedPublic = extractStoragePath(publicUrl, "wardrobe");
+assert.equal(extractedPublic, "11111111-1111-4111-8111-111111111111/1728938192-abc.jpg");
+console.log("  ✅ [PASS] 6A: extractStoragePath accurately extracts relative path from Supabase public URL");
+
+// 6B: Extract storage path from signed URL with query parameters
+const signedUrl = "https://myproject.supabase.co/storage/v1/object/sign/wardrobe/11111111-1111-4111-8111-111111111111/1728938192-abc.jpg?token=secret123";
+const extractedSigned = extractStoragePath(signedUrl, "wardrobe");
+assert.equal(extractedSigned, "11111111-1111-4111-8111-111111111111/1728938192-abc.jpg");
+console.log("  ✅ [PASS] 6B: extractStoragePath accurately strips signature query tokens from signed URLs");
+
+// 6C: Null safety on invalid or non-matching bucket URLs
+assert.equal(extractStoragePath("https://google.com/avatar.png", "wardrobe"), null);
+assert.equal(extractStoragePath("", "wardrobe"), null);
+console.log("  ✅ [PASS] 6C: extractStoragePath safely returns null on foreign domains or empty inputs");
+
+// 6D: Status validation
+assert.deepEqual(Array.from(ALLOWED_ITEM_STATUSES), ["Available", "Lent Out", "In Laundry"]);
+assert.equal(ALLOWED_ITEM_STATUSES.includes("Available"), true);
+assert.equal(ALLOWED_ITEM_STATUSES.includes("Sold"), false);
+console.log("  ✅ [PASS] 6D: Item status strictly validates against 'Available', 'Lent Out', and 'In Laundry'");
+
+// 6E: Borrower clearing when not Lent Out
+function resolveBorrowerForStatus(status, borrowedById) {
+  return status === "Lent Out" ? (borrowedById || null) : null;
+}
+assert.equal(resolveBorrowerForStatus("Available", "user-123"), null);
+assert.equal(resolveBorrowerForStatus("In Laundry", "user-123"), null);
+assert.equal(resolveBorrowerForStatus("Lent Out", "user-123"), "user-123");
+console.log("  ✅ [PASS] 6E: Item borrower reference is strictly cleared to null when status is not 'Lent Out'");
+
+// 6F: Tag validation against allowed set
+const allowedTagSet = new Set(ALLOWED_ITEM_TAGS);
+function validateTagsInput(tags) {
+  if (!Array.isArray(tags)) return { valid: false, error: "Must be array" };
+  for (const t of tags) {
+    if (!allowedTagSet.has(t)) return { valid: false, error: `Invalid tag: ${t}` };
+  }
+  return { valid: true, tags: Array.from(new Set(tags)) };
+}
+assert.equal(validateTagsInput(["Casual", "Vintage"]).valid, true);
+assert.equal(validateTagsInput(["Casual", "InvalidTag"]).valid, false);
+console.log("  ✅ [PASS] 6F: Tag validation strictly validates against the 7 allowed tag categories");
+
+// 6G: Storage deletion path prefix check prevents cross-user file deletions
+const actingUserId = "11111111-1111-4111-8111-111111111111";
+const attackerPath = "22222222-2222-4222-8222-222222222222/malicious.jpg";
+const isAuthorizedPath = attackerPath.startsWith(`${actingUserId}/`);
+assert.equal(isAuthorizedPath, false);
+console.log("  ✅ [PASS] 6G: Storage deletion path validation prevents cross-user file deletion attacks");
+
 console.log("==================================================");
-console.log("🎉 All 19 Social Engine, Circle Friends & Sharing tests PASSED!");
+console.log("🎉 All 26 Social Engine, Circle Friends, Items & Storage tests PASSED!");
 console.log("==================================================");

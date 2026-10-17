@@ -116,17 +116,46 @@ export default async function ShareDrobePage() {
           title,
           category,
           image_url,
-          owner_id
+          owner_id,
+          status,
+          borrowed_by,
+          borrower:borrowed_by (
+            id,
+            full_name,
+            email
+          )
         )
       `)
       .in("circle_id", circleIds);
+
+    interface DbItemRef {
+      id: string;
+      title: string;
+      category: string;
+      image_url: string;
+      owner_id: string;
+      status: string | null;
+      borrowed_by: string | null;
+      borrower: { id: string; full_name: string | null; email: string } | null;
+    }
 
     if (circleItemRows) {
       circleItemsMap = circleItemRows.reduce<Record<string, CircleItemPreview[]>>(
         (acc, row) => {
           if (!acc[row.circle_id]) acc[row.circle_id] = [];
           if (row.items && !Array.isArray(row.items)) {
-            acc[row.circle_id].push(row.items as unknown as CircleItemPreview);
+            const rawItem = row.items as unknown as DbItemRef;
+            acc[row.circle_id].push({
+              id: rawItem.id,
+              title: rawItem.title,
+              category: rawItem.category,
+              image_url: rawItem.image_url,
+              owner_id: rawItem.owner_id,
+              status: rawItem.status || "Available",
+              borrowed_by: rawItem.borrowed_by,
+              borrowerName:
+                rawItem.borrower?.full_name || rawItem.borrower?.email || null,
+            });
           }
           return acc;
         },
