@@ -226,6 +226,30 @@ This document serves as an exhaustive, definitive record of every engineering de
 
 ---
 
+### Milestone 8: Sprint 3 Circle Engine — Borrow Requests, Member Drawers & The Drama Feed (`feat/sprint3-circle-engine`)
+- **Part 1: Database Architecture & Circle Activity RLS (`supabase/migrations/20261018000000_sprint3_circles.sql`):**
+  - Added ENUMs `borrow_request_status` (`pending`, `approved`, `rejected`, `returned`) and `circle_activity_type` (`shared_item`, `borrowed_item`, `public_nudge`).
+  - Added `SECURITY DEFINER` helper `public.is_item_owner(lookup_item_id, lookup_user_id)` to prevent recursive RLS checks.
+  - Created `public.borrow_requests` with partial unique index `idx_borrow_requests_unique_pending` and RLS viewable by requester and item owner.
+  - Created `public.circle_activity` with chronological index `(circle_id, created_at DESC)` and circle-member RLS visibility.
+- **Part 2: Server Actions & Resend Nudge Integration (`src/app/sharedrobe/actions.ts`, `constants.ts`, `src/utils/email/resend.ts`):**
+  - Created `src/app/sharedrobe/constants.ts` with `BORROW_DURATION_OPTIONS`, `isValidBorrowDuration`, `isValidNudgeType`, and `formatPublicNudgeMessage`.
+  - Built `createBorrowRequest(itemId, circleId, durationIntent)`, `approveBorrowRequest(requestId)`, `rejectBorrowRequest(requestId)`, `nudgeReturn(itemId, type: 'private' | 'public')`, and `removeCircleMember(circleId, memberId)`.
+  - Added `sendReturnNudgeEmail` and `sendBorrowRequestEmail` to `src/utils/email/resend.ts`.
+- **Part 3: Circle Detail Route, Member Drawers & Borrow Request Modal (`src/app/sharedrobe/[id]/page.tsx`, `CircleDetailClient.tsx`, `src/components/BorrowRequestModal.tsx`):**
+  - Built SSR Circle Detail route prefetching members, garments, borrow requests, and chronological activity feed.
+  - Built horizontal scrollable Member Closet Drawers filtering garments by owner, with an `Admin ▾` dropdown on member avatars to `Remove Member`.
+  - Built `<BorrowRequestModal />` enforcing the 4 mandatory playful duration options.
+- **Part 4: The Drama Feed & Lender Controls (`CircleDetailClient.tsx` & `src/app/items/[id]/ItemDetailClient.tsx`):**
+  - Added segmented `Closet Racks` vs `Activity & Drama` view inside the Circle Detail screen, styling `'public_nudge'` events as bold Dusty Lilac siren call-out cards.
+  - Added Lender Controls (`Ask for it back` button + modal offering `'Keep it Private (Email)'` vs `'Create Drama (Public Call-out)'`) on `ItemDetailClient.tsx` whenever an item is `'Lent Out'`.
+- **QA Verification & Edge Case Matrix:**
+  - Expanded `scripts/test-social-actions-edge-cases.mjs` with Section 7 (7 new tests `7A`–`7G`).
+  - Total automated tests increased from 40 to 47 passing tests (14 upload + 33 social/items/borrow/drama).
+  - 0 ESLint errors, 0 TypeScript errors, Next.js 16 Turbopack build succeeded.
+
+---
+
 ## 3. Current Architecture & File-by-File Blueprint
 
 ```

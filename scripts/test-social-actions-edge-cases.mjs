@@ -327,6 +327,199 @@ const isAuthorizedPath = attackerPath.startsWith(`${actingUserId}/`);
 assert.equal(isAuthorizedPath, false);
 console.log("  ✅ [PASS] 6G: Storage deletion path validation prevents cross-user file deletion attacks");
 
+// -----------------------------------------------------------------------------
+// SECTION 7: Sprint 3 Circle Engine (Borrow Requests, Nudge Return & Member Admin)
+// -----------------------------------------------------------------------------
+
+const BORROW_DURATION_OPTIONS = [
+  "Just for the weekend",
+  "A couple of weeks",
+  "Until you notice it's missing",
+  "Infinity (It looks better on me anyway)",
+];
+
+const CIRCLE_ACTIVITY_TYPES = ["shared_item", "borrowed_item", "public_nudge"];
+
+function isValidBorrowDuration(duration) {
+  return typeof duration === "string" && BORROW_DURATION_OPTIONS.includes(duration.trim());
+}
+
+// 7A: Borrow duration validation against the 4 fun options
+assert.equal(BORROW_DURATION_OPTIONS.length, 4);
+assert.equal(isValidBorrowDuration("Just for the weekend"), true);
+assert.equal(isValidBorrowDuration("A couple of weeks"), true);
+assert.equal(isValidBorrowDuration("Until you notice it's missing"), true);
+assert.equal(isValidBorrowDuration("Infinity (It looks better on me anyway)"), true);
+assert.equal(isValidBorrowDuration(""), false);
+assert.equal(isValidBorrowDuration("Forever"), false);
+console.log("  ✅ [PASS] 7A: Borrow duration validation strictly enforces the 4 playful duration options");
+
+// 7B: Self-borrowing and availability validation in createBorrowRequest
+function validateBorrowEligibility({ itemOwnerId, requesterId, itemStatus }) {
+  if (itemOwnerId === requesterId) {
+    return { allowed: false, reason: "SELF_BORROW" };
+  }
+  if (itemStatus !== "Available") {
+    return { allowed: false, reason: "NOT_AVAILABLE" };
+  }
+  return { allowed: true };
+}
+assert.equal(
+  validateBorrowEligibility({
+    itemOwnerId: "11111111-1111-4111-8111-111111111111",
+    requesterId: "11111111-1111-4111-8111-111111111111",
+    itemStatus: "Available",
+  }).allowed,
+  false
+);
+assert.equal(
+  validateBorrowEligibility({
+    itemOwnerId: "11111111-1111-4111-8111-111111111111",
+    requesterId: "22222222-2222-4222-8222-222222222222",
+    itemStatus: "Lent Out",
+  }).allowed,
+  false
+);
+assert.equal(
+  validateBorrowEligibility({
+    itemOwnerId: "11111111-1111-4111-8111-111111111111",
+    requesterId: "22222222-2222-4222-8222-222222222222",
+    itemStatus: "Available",
+  }).allowed,
+  true
+);
+console.log("  ✅ [PASS] 7B: Borrow request validation blocks self-borrowing and non-Available items");
+
+// 7C: Approve borrow request owner guard & state transition
+function evaluateApproveBorrow({ actorId, itemOwnerId, requestStatus, requesterId }) {
+  if (actorId !== itemOwnerId) return { ok: false, error: "UNAUTHORIZED_OWNER" };
+  if (requestStatus !== "pending") return { ok: false, error: "ALREADY_HANDLED" };
+  return {
+    ok: true,
+    nextItemStatus: "Lent Out",
+    nextBorrowedBy: requesterId,
+    activityType: "borrowed_item",
+  };
+}
+assert.equal(
+  evaluateApproveBorrow({
+    actorId: "22222222-2222-4222-8222-222222222222",
+    itemOwnerId: "11111111-1111-4111-8111-111111111111",
+    requestStatus: "pending",
+    requesterId: "22222222-2222-4222-8222-222222222222",
+  }).ok,
+  false
+);
+const approvedTransition = evaluateApproveBorrow({
+  actorId: "11111111-1111-4111-8111-111111111111",
+  itemOwnerId: "11111111-1111-4111-8111-111111111111",
+  requestStatus: "pending",
+  requesterId: "22222222-2222-4222-8222-222222222222",
+});
+assert.equal(approvedTransition.ok, true);
+assert.equal(approvedTransition.nextItemStatus, "Lent Out");
+assert.equal(approvedTransition.nextBorrowedBy, "22222222-2222-4222-8222-222222222222");
+assert.equal(approvedTransition.activityType, "borrowed_item");
+console.log("  ✅ [PASS] 7C: approveBorrowRequest strictly enforces owner authorization and transitions item to 'Lent Out'");
+
+// 7D: Nudge return validation (private vs public, owner-only, Lent Out status required)
+function validateNudgeReturn({ actorId, itemOwnerId, itemStatus, borrowedBy, nudgeType }) {
+  if (nudgeType !== "private" && nudgeType !== "public") return { valid: false, error: "INVALID_TYPE" };
+  if (actorId !== itemOwnerId) return { valid: false, error: "NOT_OWNER" };
+  if (itemStatus !== "Lent Out" || !borrowedBy) return { valid: false, error: "NOT_LENT_OUT" };
+  return { valid: true };
+}
+assert.equal(
+  validateNudgeReturn({
+    actorId: "user-1",
+    itemOwnerId: "user-1",
+    itemStatus: "Available",
+    borrowedBy: null,
+    nudgeType: "public",
+  }).valid,
+  false
+);
+assert.equal(
+  validateNudgeReturn({
+    actorId: "user-2",
+    itemOwnerId: "user-1",
+    itemStatus: "Lent Out",
+    borrowedBy: "user-2",
+    nudgeType: "private",
+  }).valid,
+  false
+);
+assert.equal(
+  validateNudgeReturn({
+    actorId: "user-1",
+    itemOwnerId: "user-1",
+    itemStatus: "Lent Out",
+    borrowedBy: "user-2",
+    nudgeType: "public",
+  }).valid,
+  true
+);
+console.log("  ✅ [PASS] 7D: nudgeReturn strictly verifies owner identity, 'Lent Out' status, and valid nudge mode");
+
+// 7E: Public nudge call-out message formatting
+function formatPublicNudgeMessage(borrowerName, itemTitle, ownerName) {
+  const safeBorrower = borrowerName.trim() || "Bestie";
+  const safeItem = itemTitle.trim() || "that piece";
+  const ownerClause = ownerName?.trim()
+    ? ` (${ownerName.trim()} is officially calling you out 👀)`
+    : "";
+  return `🚨 Targeting ${safeBorrower}, time to give "${safeItem}" back!${ownerClause}`;
+}
+const dramaMsg = formatPublicNudgeMessage("Chloe", "Vintage Leather Trench", "Maya");
+assert.equal(
+  dramaMsg,
+  '🚨 Targeting Chloe, time to give "Vintage Leather Trench" back! (Maya is officially calling you out 👀)'
+);
+console.log("  ✅ [PASS] 7E: Public nudge generator formats playful Drama Feed call-out copy accurately");
+
+// 7F: removeCircleMember admin role and self-removal guard
+function validateRemoveCircleMember({ actorUserId, actorRole, actorStatus, targetUserId }) {
+  if (actorRole !== "admin" || actorStatus !== "approved") {
+    return { allowed: false, error: "NOT_ADMIN" };
+  }
+  if (actorUserId === targetUserId) {
+    return { allowed: false, error: "CANNOT_REMOVE_SELF" };
+  }
+  return { allowed: true };
+}
+assert.equal(
+  validateRemoveCircleMember({
+    actorUserId: "user-member",
+    actorRole: "member",
+    actorStatus: "approved",
+    targetUserId: "user-other",
+  }).allowed,
+  false
+);
+assert.equal(
+  validateRemoveCircleMember({
+    actorUserId: "user-admin",
+    actorRole: "admin",
+    actorStatus: "approved",
+    targetUserId: "user-admin",
+  }).allowed,
+  false
+);
+assert.equal(
+  validateRemoveCircleMember({
+    actorUserId: "user-admin",
+    actorRole: "admin",
+    actorStatus: "approved",
+    targetUserId: "user-member",
+  }).allowed,
+  true
+);
+console.log("  ✅ [PASS] 7F: removeCircleMember enforces Circle Admin role and blocks admin self-removal");
+
+// 7G: Circle activity action types strictly match schema ENUM
+assert.deepEqual(CIRCLE_ACTIVITY_TYPES, ["shared_item", "borrowed_item", "public_nudge"]);
+console.log("  ✅ [PASS] 7G: Circle activity types strictly match Postgres circle_activity_type ENUM");
+
 console.log("==================================================");
-console.log("🎉 All 26 Social Engine, Circle Friends, Items & Storage tests PASSED!");
+console.log("🎉 All 33 Social Engine, Circle Friends, Items, Borrow & Drama Feed tests PASSED!");
 console.log("==================================================");

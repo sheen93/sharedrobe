@@ -12,6 +12,10 @@ import {
   Check,
   Users,
   Clock,
+  Megaphone,
+  Mail,
+  Siren,
+  X,
 } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import FormMessage from "@/components/ui/FormMessage";
@@ -21,6 +25,7 @@ import {
   updateItemTags,
   deleteItem,
 } from "@/app/items/actions";
+import { nudgeReturn } from "@/app/sharedrobe/actions";
 import {
   ALLOWED_ITEM_STATUSES,
   ALLOWED_ITEM_TAGS,
@@ -61,9 +66,9 @@ export default function ItemDetailClient({
 }: ItemDetailClientProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [activeAction, setActiveAction] = useState<"status" | "tags" | "delete" | null>(
-    null
-  );
+  const [activeAction, setActiveAction] = useState<
+    "status" | "tags" | "delete" | "nudge_private" | "nudge_public" | null
+  >(null);
 
   // Status state
   const [currentStatus, setCurrentStatus] = useState<ItemStatus>(item.status);
@@ -74,8 +79,9 @@ export default function ItemDetailClient({
   // Tags state
   const [selectedTags, setSelectedTags] = useState<string[]>(item.tags);
 
-  // Delete confirmation modal state
+  // Modals state
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isNudgeModalOpen, setIsNudgeModalOpen] = useState(false);
 
   // Feedback banner state
   const [feedback, setFeedback] = useState<{
@@ -168,6 +174,25 @@ export default function ItemDetailClient({
       } else {
         showFeedback("error", res.error);
         setIsDeleteModalOpen(false);
+      }
+    });
+  };
+
+  // Nudge Borrower to Return Garment ('private' | 'public')
+  const handleNudgeReturn = (type: "private" | "public") => {
+    if (!isOwner || isPending) return;
+
+    setActiveAction(type === "private" ? "nudge_private" : "nudge_public");
+    startTransition(async () => {
+      const res = await nudgeReturn(item.id, type);
+      setActiveAction(null);
+      setIsNudgeModalOpen(false);
+
+      if (res.success) {
+        showFeedback("success", res.message);
+        router.refresh();
+      } else {
+        showFeedback("error", res.error);
       }
     });
   };
@@ -352,6 +377,32 @@ export default function ItemDetailClient({
                     )}
                   </button>
                 )}
+
+                {/* LENDER CONTROLS: 'Ask for it back' when item is Lent Out */}
+                {item.status === "Lent Out" && item.borrowedBy && (
+                  <div className="pt-1 border-t border-border-neutral/70">
+                    <div className="flex items-center justify-between gap-2 rounded-xl border border-dusty-lilac/40 bg-dusty-lilac/15 p-3">
+                      <div className="min-w-0">
+                        <p className="font-mono text-[9px] font-extrabold uppercase tracking-wider text-french-navy">
+                          LENDER CONTROLS // ON LOAN
+                        </p>
+                        <p className="mt-0.5 truncate text-xs font-bold text-midnight-slate">
+                          With {item.borrowerName || "a friend"} right now
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isPending}
+                        onClick={() => setIsNudgeModalOpen(true)}
+                        className="flex shrink-0 items-center gap-1.5 rounded-xl bg-french-navy px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-french-navy-hover active:scale-95 disabled:opacity-50"
+                      >
+                        <Megaphone size={13} className="text-dusty-lilac" />
+                        <span>Ask for it back</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex items-center justify-between rounded-xl bg-white p-2.5">
@@ -444,6 +495,112 @@ export default function ItemDetailClient({
       {/* Persistent Bottom Nav Docked as Part of the Screen */}
       <BottomNav />
     </main>
+
+      {/* LENDER CONTROLS MODAL: 'Keep it Private (Email)' vs 'Create Drama (Public Call-out)' */}
+      {isNudgeModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="nudge-modal-title"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-midnight-slate/55 p-0 backdrop-blur-xs sm:items-center sm:p-4"
+        >
+          <div className="relative flex w-full max-w-md flex-col rounded-t-3xl border border-border-neutral bg-buttercream p-5 shadow-2xl sm:rounded-[28px] animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <span className="inline-flex items-center gap-1 rounded-md bg-dusty-lilac/15 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-french-navy">
+                  <Megaphone className="h-3 w-3 text-dusty-lilac" />
+                  CLOSET RETRIEVAL // ASK FOR IT BACK
+                </span>
+                <h3
+                  id="nudge-modal-title"
+                  className="mt-1.5 text-lg font-extrabold text-midnight-slate"
+                >
+                  Want &ldquo;{item.title}&rdquo; back?
+                </h3>
+                <p className="mt-0.5 text-xs text-muted">
+                  Choose your vibe for nudging{" "}
+                  <strong className="text-midnight-slate">
+                    {item.borrowerName || "your friend"}
+                  </strong>
+                  :
+                </p>
+              </div>
+
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => setIsNudgeModalOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-border-neutral bg-chalk text-muted transition hover:text-midnight-slate disabled:opacity-50"
+                aria-label="Close modal"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-2.5">
+              {/* Option 1: Keep it Private (Email) */}
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => handleNudgeReturn("private")}
+                className="group flex w-full items-center gap-3.5 rounded-2xl border border-border-strong bg-chalk p-3.5 text-left transition hover:border-french-navy hover:bg-white active:scale-99 disabled:opacity-50"
+              >
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-french-navy text-white shadow-xs transition group-hover:scale-105">
+                  {isPending && activeAction === "nudge_private" ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Mail size={18} />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-extrabold text-midnight-slate">
+                    Keep it Private (Email) 💌
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-muted leading-snug">
+                    Sends a sweet, low-key email reminder just between the two
+                    of you. Zero public embarrassment.
+                  </p>
+                </div>
+              </button>
+
+              {/* Option 2: Create Drama (Public Call-out) */}
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => handleNudgeReturn("public")}
+                className="group flex w-full items-center gap-3.5 rounded-2xl border-2 border-dusty-lilac bg-dusty-lilac p-3.5 text-left text-white shadow-md transition hover:brightness-95 active:scale-99 disabled:opacity-50"
+              >
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-french-navy text-amber-300 shadow-xs transition group-hover:scale-105">
+                  {isPending && activeAction === "nudge_public" ? (
+                    <Loader2 size={18} className="animate-spin text-white" />
+                  ) : (
+                    <Siren size={19} />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-extrabold text-white">
+                    Create Drama (Public Call-out) 🚨
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-white/90 leading-snug">
+                    Blasts a bold siren card directly into the Circle Drama Feed
+                    calling out {item.borrowerName?.split(" ")[0] || "them"} in
+                    front of the squad!
+                  </p>
+                </div>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => setIsNudgeModalOpen(false)}
+              className="mt-4 w-full rounded-xl border border-border-neutral bg-chalk py-2.5 text-xs font-bold text-muted transition hover:text-midnight-slate disabled:opacity-50"
+            >
+              Let them keep rocking it for now
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* DELETE CONFIRMATION MODAL */}
       {isDeleteModalOpen && (

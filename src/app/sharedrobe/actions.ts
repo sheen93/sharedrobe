@@ -7,18 +7,20 @@ import {
   sendFriendRequestEmail,
   sendCircleJoinRequestEmail,
   sendCircleAddedNotificationEmail,
+  sendReturnNudgeEmail,
+  sendBorrowRequestEmail,
 } from "@/utils/email/resend";
+import {
+  isValidUuid,
+  isValidBorrowDuration,
+  isValidNudgeType,
+  formatPublicNudgeMessage,
+  type NudgeReturnType,
+} from "./constants";
 
 export type ActionResult<T = unknown> =
   | { success: true; message: string; data?: T; notificationSent?: boolean }
   | { success: false; error: string; fieldErrors?: Record<string, string> };
-
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function isValidUuid(id: unknown): id is string {
-  return typeof id === "string" && UUID_REGEX.test(id.trim());
-}
 
 async function getRequestOrigin(): Promise<string> {
   const headerList = await headers();
@@ -488,7 +490,21 @@ export async function shareItemToCircle(
     };
   }
 
+  // Log 'shared_item' event into circle_activity (non-fatal)
+  try {
+    await supabase.from("circle_activity").insert({
+      circle_id: circleId,
+      actor_id: user.id,
+      action_type: "shared_item",
+      target_item_id: itemId,
+      message: `Dropped "${item.title}" into the circle closet! Who's calling dibs? ✨`,
+    });
+  } catch (activityErr) {
+    console.warn("[ShareItemToCircle] Non-fatal activity log error:", activityErr);
+  }
+
   revalidatePath("/sharedrobe");
+  revalidatePath(`/sharedrobe/${circleId}`);
   revalidatePath("/");
   return {
     success: true,
@@ -701,7 +717,22 @@ export async function shareItemToCircles(
     return { success: false, error: insertErr.message };
   }
 
+  // Log 'shared_item' activity events across newly shared circles (non-fatal)
+  try {
+    const activityRows = newCircleIds.map((cid) => ({
+      circle_id: cid,
+      actor_id: user.id,
+      action_type: "shared_item",
+      target_item_id: itemId,
+      message: `Dropped "${item.title}" into the circle closet! Who's calling dibs? ✨`,
+    }));
+    await supabase.from("circle_activity").insert(activityRows);
+  } catch (activityErr) {
+    console.warn("[ShareItemToCircles] Non-fatal activity log error:", activityErr);
+  }
+
   revalidatePath("/sharedrobe");
+  newCircleIds.forEach((cid) => revalidatePath(`/sharedrobe/${cid}`));
   revalidatePath("/");
   return {
     success: true,
@@ -1254,6 +1285,734 @@ export async function addFriendsToCircle(
     data: { addedCount: newFriendIds.length },
   };
 }
+
+// ==============================================================================
+// Sprint 3: Circle Engine — Borrow Requests, Activity / Drama Feed & Member Admin
+// ==============================================================================
+
+/**
+ * Submits a playful borrow request for a garment inside a shared circle.
+ * Validates:
+ * - itemId and circleId are valid UUIDs
+ * - durationIntent matches one of the 4 official fun borrow durations
+ * - Authenticated user is an approved member of circleId
+ * - Item exists, is shared in circleId, is not owned by the requester, and is 'Available'
+ * - Prevents duplicate active pending borrow requests
+ */
+export async function createBorrowRequest(
+  itemId: string,
+  circleId: string,
+  durationIntent: string
+): Promise<ActionResult<{ requestId: string }>> {
+  if (!isValidUuid(itemId)) {
+    return { success: false, error: "Invalid garment ID specified." };
+  }
+  if (!isValidUuid(circleId)) {
+    return { success: false, error: "Invalid circle ID specified." };
+  }
+
+  const trimmedDuration =
+    typeof durationIntent === "string" ? durationIntent.trim() : "";
+  if (!isValidBorrowDuration(trimmedDuration)) {
+    return {
+      success: false,
+      error: "Please pick how long you're planning to hijack this piece!",
+      fieldErrors: {
+        durationIntent: "Select a valid borrow duration from the dropdown.",
+      },
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      success: false,
+      error: "Please sign in to call dibs on circle garments.",
+    };
+  }
+
+  // 1. Verify requester is an approved member of this circle
+  const { data: membership, error: memErr } = await supabase
+    .from("circle_members")
+    .select("id, status")
+    .eq("circle_id", circleId)
+    .eq("user_id", user.id)
+    .eq("status", "approved")
+    .maybeSingle();
+
+  if (memErr || !membership) {
+    return {
+      success: false,
+      error: "You must be an approved member of this circle to borrow garments.",
+    };
+  }
+
+  // 2. Fetch item details and verify it is shared in this circle
+  const { data: item, error: itemErr } = await supabase
+    .from("items")
+    .select("id, title, owner_id, status")
+    .eq("id", itemId)
+    .maybeSingle();
+
+  if (itemErr || !item) {
+    return {
+      success: false,
+      error: "Could not find this garment in the closet.",
+    };
+  }
+
+  if (item.owner_id === user.id) {
+    return {
+      success: false,
+      error: "Wait a sec — this is already your piece! No need to borrow from yourself.",
+    };
+  }
+
+  if (item.status !== "Available") {
+    return {
+      success: false,
+      error: `Too slow! "${item.title}" is currently ${item.status} and unavailable to borrow right now.`,
+    };
+  }
+
+  const { data: sharedInCircle } = await supabase
+    .from("circle_items")
+    .select("id")
+    .eq("circle_id", circleId)
+    .eq("item_id", itemId)
+    .maybeSingle();
+
+  if (!sharedInCircle) {
+    return {
+      success: false,
+      error: "This garment is not currently shared inside this circle.",
+    };
+  }
+
+  // 3. Check for existing pending request from this user for this item
+  const { data: existingReq } = await supabase
+    .from("borrow_requests")
+    .select("id, status")
+    .eq("item_id", itemId)
+    .eq("requester_id", user.id)
+    .eq("circle_id", circleId)
+    .eq("status", "pending")
+    .maybeSingle();
+
+  if (existingReq) {
+    return {
+      success: false,
+      error: `Hang tight! You already called dibs on "${item.title}" — waiting on the owner's green light.`,
+    };
+  }
+
+  // 4. Insert borrow request
+  const { data: created, error: insertErr } = await supabase
+    .from("borrow_requests")
+    .insert({
+      item_id: itemId,
+      requester_id: user.id,
+      circle_id: circleId,
+      status: "pending",
+      duration_intent: trimmedDuration,
+    })
+    .select("id")
+    .single();
+
+  if (insertErr || !created) {
+    return {
+      success: false,
+      error: insertErr?.message || "Failed to submit borrow request.",
+    };
+  }
+
+  // 5. Non-fatal notification email to the garment owner
+  let notificationSent = false;
+  try {
+    const [{ data: ownerProfile }, { data: circleData }, { data: requesterProfile }] =
+      await Promise.all([
+        supabase
+          .from("profiles")
+          .select("full_name, email")
+          .eq("id", item.owner_id)
+          .maybeSingle(),
+        supabase
+          .from("circles")
+          .select("name")
+          .eq("id", circleId)
+          .maybeSingle(),
+        supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", user.id)
+          .maybeSingle(),
+      ]);
+
+    if (ownerProfile?.email) {
+      const origin = await getRequestOrigin();
+      const requesterName =
+        requesterProfile?.full_name ||
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        "A circle bestie";
+
+      const emailRes = await sendBorrowRequestEmail({
+        ownerEmail: ownerProfile.email,
+        ownerName: ownerProfile.full_name || "Closet Icon",
+        requesterName,
+        itemTitle: item.title,
+        circleName: circleData?.name || "Your Circle",
+        durationIntent: trimmedDuration,
+        appUrl: origin,
+      });
+      notificationSent = Boolean(emailRes.success);
+    }
+  } catch (err) {
+    console.warn("[CreateBorrowRequest] Non-fatal notification error:", err);
+  }
+
+  revalidatePath("/sharedrobe");
+  revalidatePath(`/sharedrobe/${circleId}`);
+  revalidatePath(`/items/${itemId}`);
+  return {
+    success: true,
+    message: `Dibs called! ✨ Borrow request sent for "${item.title}" (${trimmedDuration}).`,
+    data: { requestId: created.id },
+    notificationSent,
+  };
+}
+
+/**
+ * Approves a pending borrow request.
+ * - Verifies authenticated user is the owner of the requested garment
+ * - Updates borrow_requests status to 'approved' (and auto-rejects competing pending requests)
+ * - Updates items status to 'Lent Out' and sets borrowed_by = requester_id
+ * - Logs a playful 'borrowed_item' event into circle_activity
+ */
+export async function approveBorrowRequest(
+  requestId: string
+): Promise<ActionResult<{ itemId: string; circleId: string }>> {
+  if (!isValidUuid(requestId)) {
+    return { success: false, error: "Invalid borrow request ID provided." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      success: false,
+      error: "Authentication required to approve borrow requests.",
+    };
+  }
+
+  // 1. Fetch borrow request
+  const { data: requestRow, error: reqErr } = await supabase
+    .from("borrow_requests")
+    .select("id, item_id, requester_id, circle_id, status, duration_intent")
+    .eq("id", requestId)
+    .maybeSingle();
+
+  if (reqErr || !requestRow) {
+    return {
+      success: false,
+      error: "Borrow request could not be found or was already handled.",
+    };
+  }
+
+  if (requestRow.status !== "pending") {
+    return {
+      success: false,
+      error: `This borrow request has already been ${requestRow.status}.`,
+    };
+  }
+
+  // 2. Verify current user strictly owns the garment
+  const { data: item, error: itemErr } = await supabase
+    .from("items")
+    .select("id, title, owner_id, status")
+    .eq("id", requestRow.item_id)
+    .maybeSingle();
+
+  if (itemErr || !item) {
+    return {
+      success: false,
+      error: "Associated garment could not be found.",
+    };
+  }
+
+  if (item.owner_id !== user.id) {
+    return {
+      success: false,
+      error: "Only the garment owner can approve a borrow request.",
+    };
+  }
+
+  // 3. Mark the request as 'approved'
+  const nowIso = new Date().toISOString();
+  const { error: updateReqErr } = await supabase
+    .from("borrow_requests")
+    .update({
+      status: "approved",
+      updated_at: nowIso,
+    })
+    .eq("id", requestId);
+
+  if (updateReqErr) {
+    return {
+      success: false,
+      error: updateReqErr.message || "Failed to update borrow request status.",
+    };
+  }
+
+  // Auto-decline any other competing pending requests for this same garment
+  await supabase
+    .from("borrow_requests")
+    .update({ status: "rejected", updated_at: nowIso })
+    .eq("item_id", item.id)
+    .eq("status", "pending")
+    .neq("id", requestId);
+
+  // 4. Update item status to 'Lent Out' and set borrowed_by
+  const { error: updateItemErr } = await supabase
+    .from("items")
+    .update({
+      status: "Lent Out",
+      borrowed_by: requestRow.requester_id,
+    })
+    .eq("id", item.id)
+    .eq("owner_id", user.id);
+
+  if (updateItemErr) {
+    return {
+      success: false,
+      error: updateItemErr.message || "Failed to mark garment as Lent Out.",
+    };
+  }
+
+  // 5. Log 'borrowed_item' event into circle_activity
+  const [{ data: borrowerProfile }, { data: ownerProfile }] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", requestRow.requester_id)
+      .maybeSingle(),
+    supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", user.id)
+      .maybeSingle(),
+  ]);
+
+  const borrowerName = borrowerProfile?.full_name || "A circle friend";
+  const ownerName =
+    ownerProfile?.full_name ||
+    user.user_metadata?.full_name ||
+    "their friend";
+
+  const activityMessage = `${borrowerName} snagged "${item.title}" from ${ownerName} — "${requestRow.duration_intent}" ✨`;
+
+  const { error: activityErr } = await supabase.from("circle_activity").insert({
+    circle_id: requestRow.circle_id,
+    actor_id: requestRow.requester_id,
+    action_type: "borrowed_item",
+    target_item_id: item.id,
+    message: activityMessage,
+  });
+
+  if (activityErr) {
+    console.warn("[ApproveBorrowRequest] Activity insert warning:", activityErr);
+  }
+
+  revalidatePath("/sharedrobe");
+  revalidatePath(`/sharedrobe/${requestRow.circle_id}`);
+  revalidatePath(`/items/${item.id}`);
+  revalidatePath("/");
+
+  return {
+    success: true,
+    message: `It's official! "${item.title}" is now lent out to ${borrowerName}. ✨`,
+    data: { itemId: item.id, circleId: requestRow.circle_id },
+  };
+}
+
+/**
+ * Declines a pending borrow request. Strictly restricted to the garment owner or the requester.
+ */
+export async function rejectBorrowRequest(
+  requestId: string
+): Promise<ActionResult> {
+  if (!isValidUuid(requestId)) {
+    return { success: false, error: "Invalid borrow request ID provided." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "Authentication required." };
+  }
+
+  const { data: requestRow } = await supabase
+    .from("borrow_requests")
+    .select("id, item_id, requester_id, circle_id, status")
+    .eq("id", requestId)
+    .maybeSingle();
+
+  if (!requestRow) {
+    return { success: false, error: "Borrow request not found." };
+  }
+
+  const { data: item } = await supabase
+    .from("items")
+    .select("id, title, owner_id")
+    .eq("id", requestRow.item_id)
+    .maybeSingle();
+
+  if (requestRow.requester_id !== user.id && item?.owner_id !== user.id) {
+    return {
+      success: false,
+      error: "You are not authorized to decline this borrow request.",
+    };
+  }
+
+  const { error: updateErr } = await supabase
+    .from("borrow_requests")
+    .update({
+      status: "rejected",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", requestId);
+
+  if (updateErr) {
+    return { success: false, error: updateErr.message };
+  }
+
+  revalidatePath("/sharedrobe");
+  revalidatePath(`/sharedrobe/${requestRow.circle_id}`);
+  revalidatePath(`/items/${requestRow.item_id}`);
+
+  return {
+    success: true,
+    message: "Borrow request declined.",
+  };
+}
+
+/**
+ * Triggers a return nudge for a lent-out garment:
+ * - 'private': Sends a friendly Resend email to the borrower.
+ * - 'public': Inserts a playful 'public_nudge' call-out into circle_activity.
+ */
+export async function nudgeReturn(
+  itemId: string,
+  type: NudgeReturnType
+): Promise<ActionResult<{ type: NudgeReturnType; notificationSent?: boolean }>> {
+  if (!isValidUuid(itemId)) {
+    return { success: false, error: "Invalid garment ID specified." };
+  }
+  if (!isValidNudgeType(type)) {
+    return {
+      success: false,
+      error: "Nudge type must be either 'private' or 'public'.",
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      success: false,
+      error: "Authentication required to nudge for a return.",
+    };
+  }
+
+  // 1. Fetch item and verify current user is the owner and item is 'Lent Out'
+  const { data: item, error: itemErr } = await supabase
+    .from("items")
+    .select("id, title, owner_id, status, borrowed_by")
+    .eq("id", itemId)
+    .maybeSingle();
+
+  if (itemErr || !item) {
+    return { success: false, error: "Garment could not be found." };
+  }
+
+  if (item.owner_id !== user.id) {
+    return {
+      success: false,
+      error: "Only the garment's rightful owner can ask for it back!",
+    };
+  }
+
+  if (item.status !== "Lent Out" || !item.borrowed_by) {
+    return {
+      success: false,
+      error: `"${item.title}" isn't currently lent out to anyone.`,
+    };
+  }
+
+  // 2. Fetch borrower and owner profile info
+  const [{ data: borrowerProfile }, { data: ownerProfile }] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, full_name, email")
+      .eq("id", item.borrowed_by)
+      .maybeSingle(),
+    supabase
+      .from("profiles")
+      .select("id, full_name")
+      .eq("id", user.id)
+      .maybeSingle(),
+  ]);
+
+  const borrowerName = borrowerProfile?.full_name || "Your Friend";
+  const ownerName =
+    ownerProfile?.full_name ||
+    user.user_metadata?.full_name ||
+    user.user_metadata?.name ||
+    "Your Friend";
+
+  // Branch A: Private Email Nudge via Resend
+  if (type === "private") {
+    if (!borrowerProfile?.email) {
+      return {
+        success: false,
+        error: "Could not find an email address for the borrower.",
+      };
+    }
+
+    let notificationSent = false;
+    try {
+      const origin = await getRequestOrigin();
+      const emailResult = await sendReturnNudgeEmail({
+        borrowerEmail: borrowerProfile.email,
+        borrowerName,
+        ownerName,
+        itemTitle: item.title,
+        appUrl: origin,
+      });
+      notificationSent = Boolean(emailResult.success);
+    } catch (err) {
+      console.warn("[NudgeReturn:Private] Non-fatal Resend error:", err);
+    }
+
+    revalidatePath(`/items/${item.id}`);
+    return {
+      success: true,
+      message: `Gentle private nudge sent to ${borrowerName}! Zero public drama (for now). 💌`,
+      data: { type: "private", notificationSent },
+      notificationSent,
+    };
+  }
+
+  // Branch B: Public Call-out ('public_nudge') in circle_activity
+  // Resolve target circle(s) where the item was borrowed or shared
+  const targetCircleIds = new Set<string>();
+
+  // 1) Check approved borrow_requests for this item & borrower
+  const { data: approvedBorrowReq } = await supabase
+    .from("borrow_requests")
+    .select("circle_id")
+    .eq("item_id", item.id)
+    .eq("requester_id", item.borrowed_by)
+    .eq("status", "approved")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (approvedBorrowReq?.circle_id) {
+    targetCircleIds.add(approvedBorrowReq.circle_id);
+  }
+
+  // 2) Fallback: find circles where this item is shared
+  if (targetCircleIds.size === 0) {
+    const { data: sharedCircles } = await supabase
+      .from("circle_items")
+      .select("circle_id")
+      .eq("item_id", item.id);
+
+    (sharedCircles || []).forEach((row) => targetCircleIds.add(row.circle_id));
+  }
+
+  // 3) Second fallback: find any mutual circle where both owner and borrower are approved members
+  if (targetCircleIds.size === 0) {
+    const [{ data: ownerCircles }, { data: borrowerCircles }] = await Promise.all([
+      supabase
+        .from("circle_members")
+        .select("circle_id")
+        .eq("user_id", user.id)
+        .eq("status", "approved"),
+      supabase
+        .from("circle_members")
+        .select("circle_id")
+        .eq("user_id", item.borrowed_by)
+        .eq("status", "approved"),
+    ]);
+
+    const borrowerCircleSet = new Set(
+      (borrowerCircles || []).map((c) => c.circle_id)
+    );
+    (ownerCircles || []).forEach((c) => {
+      if (borrowerCircleSet.has(c.circle_id)) {
+        targetCircleIds.add(c.circle_id);
+      }
+    });
+  }
+
+  if (targetCircleIds.size === 0) {
+    return {
+      success: false,
+      error:
+        "No shared circle found with this borrower to post a public call-out! Try sending a private email nudge instead.",
+    };
+  }
+
+  const nudgeMessage = formatPublicNudgeMessage(
+    borrowerName,
+    item.title,
+    ownerName
+  );
+
+  const activityRows = Array.from(targetCircleIds).map((cid) => ({
+    circle_id: cid,
+    actor_id: user.id,
+    action_type: "public_nudge" as const,
+    target_item_id: item.id,
+    message: nudgeMessage,
+  }));
+
+  const { error: insertActErr } = await supabase
+    .from("circle_activity")
+    .insert(activityRows);
+
+  if (insertActErr) {
+    return {
+      success: false,
+      error:
+        insertActErr.message || "Failed to post public nudge to the Drama Feed.",
+    };
+  }
+
+  revalidatePath("/sharedrobe");
+  targetCircleIds.forEach((cid) => revalidatePath(`/sharedrobe/${cid}`));
+  revalidatePath(`/items/${item.id}`);
+
+  return {
+    success: true,
+    message: `Drama deployed! 🚨 Public call-out posted to the Circle Feed targeting ${borrowerName}!`,
+    data: { type: "public" },
+  };
+}
+
+/**
+ * Removes a member from a circle.
+ * Strictly verifies that the authenticated actor is an approved Circle Admin.
+ * Supports passing either circle_members.id OR the member's user_id (profiles.id).
+ */
+export async function removeCircleMember(
+  circleId: string,
+  memberId: string
+): Promise<ActionResult<{ removedUserId: string }>> {
+  if (!isValidUuid(circleId)) {
+    return { success: false, error: "Invalid circle ID specified." };
+  }
+  if (!isValidUuid(memberId)) {
+    return { success: false, error: "Invalid member ID specified." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      success: false,
+      error: "Authentication required to manage circle members.",
+    };
+  }
+
+  // 1. Verify actor is an approved admin of circleId
+  const { data: adminRecord, error: adminErr } = await supabase
+    .from("circle_members")
+    .select("id, role, status")
+    .eq("circle_id", circleId)
+    .eq("user_id", user.id)
+    .eq("role", "admin")
+    .eq("status", "approved")
+    .maybeSingle();
+
+  if (adminErr || !adminRecord) {
+    return {
+      success: false,
+      error: "Only Circle Admins have permission to remove members from this circle.",
+    };
+  }
+
+  // 2. Locate target membership record (accepts either circle_members.id or user_id)
+  const { data: targetMember, error: targetErr } = await supabase
+    .from("circle_members")
+    .select("id, circle_id, user_id, role")
+    .eq("circle_id", circleId)
+    .or(`id.eq.${memberId},user_id.eq.${memberId}`)
+    .maybeSingle();
+
+  if (targetErr || !targetMember) {
+    return {
+      success: false,
+      error: "Member could not be found in this circle.",
+    };
+  }
+
+  if (targetMember.user_id === user.id) {
+    return {
+      success: false,
+      error: "Admins cannot remove themselves from their own circle.",
+    };
+  }
+
+  // 3. Remove any items shared by this member inside this circle
+  await supabase
+    .from("circle_items")
+    .delete()
+    .eq("circle_id", circleId)
+    .eq("shared_by", targetMember.user_id);
+
+  // 4. Delete the circle_members row
+  const { error: deleteErr } = await supabase
+    .from("circle_members")
+    .delete()
+    .eq("id", targetMember.id)
+    .eq("circle_id", circleId);
+
+  if (deleteErr) {
+    return {
+      success: false,
+      error: deleteErr.message || "Failed to remove member from circle.",
+    };
+  }
+
+  revalidatePath("/sharedrobe");
+  revalidatePath(`/sharedrobe/${circleId}`);
+
+  return {
+    success: true,
+    message: "Member has been removed from the circle.",
+    data: { removedUserId: targetMember.user_id },
+  };
+}
+
 
 
 

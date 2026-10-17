@@ -594,6 +594,16 @@ export default function SharedrobeClient({
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                          <Link
+                            href={`/sharedrobe/${circle.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-1 rounded-lg bg-french-navy px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-french-navy-hover shadow-2xs active:scale-95"
+                            title="Open Circle Closet & Member Drawers"
+                          >
+                            <span>Open Circle</span>
+                            <ChevronRight size={11} strokeWidth={2.5} />
+                          </Link>
+
                           <button
                             type="button"
                             onClick={(e) => {
@@ -607,10 +617,6 @@ export default function SharedrobeClient({
                             <span className="hidden sm:inline">Add Friends</span>
                           </button>
 
-                          <span className="rounded-md border border-border-neutral bg-buttercream px-2 py-0.5 font-mono text-[11px] font-medium text-french-navy">
-                            {circle.memberCount}{" "}
-                            {circle.memberCount === 1 ? "Member" : "Members"}
-                          </span>
                           <ChevronRight
                             className={cn(
                               "h-4 w-4 text-muted transition duration-200",
@@ -624,21 +630,29 @@ export default function SharedrobeClient({
                       {isExpanded && (
                         <div className="border-t border-border-neutral/60 bg-buttercream/50 p-3.5 animate-in fade-in duration-150">
                           {/* Circle Member Management Bar */}
-                          <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-border-neutral/60">
+                          <div className="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-border-neutral/60">
                             <div className="flex items-center gap-1.5">
                               <Users size={12} className="text-dusty-lilac" />
                               <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted">
                                 CIRCLE MEMBERS ({circle.memberCount})
                               </span>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => setAddFriendsModalCircle(circle)}
-                              className="flex items-center gap-1 rounded-lg bg-french-navy px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-french-navy-hover active:scale-95 shadow-xs"
-                            >
-                              <UserPlus size={11} strokeWidth={2.5} />
-                              <span>+ Add Friends to Circle</span>
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setAddFriendsModalCircle(circle)}
+                                className="flex items-center gap-1 rounded-lg border border-border-neutral bg-chalk px-2 py-1 text-[10px] font-bold text-french-navy transition hover:bg-french-navy hover:text-white active:scale-95 shadow-2xs"
+                              >
+                                <UserPlus size={11} strokeWidth={2.5} />
+                                <span>+ Add Friends</span>
+                              </button>
+                              <Link
+                                href={`/sharedrobe/${circle.id}`}
+                                className="flex items-center gap-1 rounded-lg bg-french-navy px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-french-navy-hover active:scale-95 shadow-xs"
+                              >
+                                <span>Enter Circle Closet →</span>
+                              </Link>
+                            </div>
                           </div>
 
                           <div className="flex items-center justify-between mb-2">
