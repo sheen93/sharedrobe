@@ -2,8 +2,8 @@
 
 > **Document Type:** Multi-Agent System Handoff & System State Blueprint  
 > **Repository:** `sheen93/sharedrobe`  
-> **Last Updated:** October 16, 2026 (Local Time: 18:15 EDT)  
-> **Current Stable Commit on `main`:** `e835bca`  
+> **Last Updated:** October 17, 2026 (Local Time: 02:10 EDT)  
+> **Current Stable Commit on `main`:** `feat/sprint2-item-management`  
 > **Active Environment:** Next.js 16.3.5 (App Router, Turbopack) / React 19 / TypeScript 5 / Tailwind CSS v4 / Supabase (@supabase/ssr)
 
 ---
@@ -189,6 +189,39 @@ This document serves as an exhaustive, definitive record of every engineering de
 
 ---
 
+### Milestone 7: Item Management Engine, Dynamic Item Detail Page & Feed Integration (`feat/sprint2-item-management`)
+- **Part 1: Database Architecture & Constraints (`supabase/migrations/20261017000000_sprint2_item_management.sql`):**
+  - Added `item_status` ENUM (`Available`, `Lent Out`, `In Laundry`).
+  - Added `status` column to `public.items` (type `item_status`, default `'Available'`).
+  - Added `borrowed_by` column (UUID referencing `public.profiles.id`, nullable).
+  - Enforced Postgres CHECK constraint `items_tags_allowed_check` on `tags` array strictly allowing: `'Casual'`, `'Formal'`, `'Vintage'`, `'Streetwear'`, `'Workwear'`, `'Athletic'`, `'Lounge'`.
+- **Part 2: Data Access & Storage Cleanup (`src/app/items/actions.ts` & `src/app/items/constants.ts`):**
+  - Built typed Server Actions:
+    - `updateItemStatus(itemId, status, borrowedById?)`: verifies ownership (`auth.uid() = owner_id`), validates friend connection if `Lent Out`, automatically clears `borrowed_by` to null if `Available` or `In Laundry`.
+    - `updateItemTags(itemId, tags[])`: validates against allowed tags, persists array update.
+    - `deleteItem(itemId, imageUrl)`: extracts relative path from URL via `extractStoragePath`, enforces user folder prefix security (`${user.id}/...`), purges file from `wardrobe` storage bucket, and deletes Postgres row.
+  - Turbopack compliance refactoring: moved non-async helpers, constants (`ALLOWED_ITEM_STATUSES`, `ALLOWED_ITEM_TAGS`), and types (`ItemStatus`, `ItemTag`) into `src/app/items/constants.ts` so `"use server"` files strictly export async functions.
+- **Part 3: Dynamic Item Detail UI (`src/app/items/[id]/page.tsx` & `ItemDetailClient.tsx`):**
+  - Built SSR route `src/app/items/[id]/page.tsx` using Next.js 16 async params (`Promise<{ id: string }>`), prefetching item with joins to owner profile, borrower profile, and user's accepted friends.
+  - Built `ItemDetailClient.tsx` matching Google Stitch tokens (`Chalk`, `French Navy`, `Dusty Lilac`, `Buttercream`):
+    - Full-bleed responsive card containing high-res image and category chip.
+    - Dynamic status badge showing current status (`Available`, `In Laundry`, or `Lent to [Friend Name]`).
+    - 3-way segmented status toggle (`Available`, `Lent Out`, `In Laundry`).
+    - Conditional friend-selector dropdown rendered only when `Lent Out` is active.
+    - Interactive 7-tag aesthetic pill selector.
+    - Prominent `Delete Garment from Closet` button triggering an accessible confirmation modal (`aria-modal="true"`) before executing cloud storage + DB purge.
+- **Part 4: Feed Integration (`src/app/page.tsx`, `MyDrobeClient.tsx`, `src/app/sharedrobe/page.tsx`, `SharedrobeClient.tsx`):**
+  - SSR queries updated to select `status`, `borrowed_by`, and join with `borrower:borrowed_by (id, full_name, email)`.
+  - Wrapped wardrobe cards in MyDrobe (`src/app/MyDrobeClient.tsx`) and circle shared item previews in ShareDrobe (`src/app/sharedrobe/SharedrobeClient.tsx`) with `<Link href={'/items/${item.id}'}>`.
+  - Added visual status badges: small Dusty Lilac pill saying `"Lent to [Friend Name]"` and Amber pill saying `"In Laundry"` if status is not `'Available'`.
+  - Preserved independent action buttons (Share to Circle) using `stopPropagation` / `preventDefault`.
+- **QA Verification & Edge Case Matrix:**
+  - Expanded `scripts/test-social-actions-edge-cases.mjs` with Section 6 (7 new tests verifying storage path extraction, signed token stripping, status transitions, borrower clearing, tag constraints, and storage cross-user deletion protection).
+  - Total automated tests increased from 33 to 40 passing tests (14 upload + 26 social/item management).
+  - 0 ESLint errors, 0 TypeScript errors, Next.js Turbopack production build succeeded.
+
+---
+
 ## 3. Current Architecture & File-by-File Blueprint
 
 ```
@@ -197,12 +230,18 @@ sharedrobe/
 ├── docs/
 │   └── AUTH.md                     # Supabase authentication & deployment guide
 ├── scripts/
-│   ├── test-social-actions-edge-cases.mjs # QA Advocate social actions test suite (19 tests)
+│   ├── test-social-actions-edge-cases.mjs # QA Advocate social & items edge-case test suite (26 tests)
 │   ├── test-upload-edge-cases.mjs  # QA Advocate automated edge-case test suite (14 tests)
 │   └── validate-and-pr.sh          # CI pre-PR pipeline (lint -> typecheck -> test -> build -> push)
 ├── src/
 │   ├── app/
 │   │   ├── auth/confirm/route.ts   # Supabase email confirmation callback (PKCE + token_hash)
+│   │   ├── items/
+│   │   │   ├── [id]/
+│   │   │   │   ├── page.tsx        # SSR item detail prefetching owner, borrower, and friends
+│   │   │   │   └── ItemDetailClient.tsx # Full-bleed image card, 3-way status toggle, 7-tag selector, delete modal
+│   │   │   ├── actions.ts          # Server actions: updateItemStatus, updateItemTags, deleteItem
+│   │   │   └── constants.ts        # Item statuses, tag constraints, UUID/storage helpers (Turbopack safe)
 │   │   ├── login/
 │   │   │   ├── actions.ts          # Server actions for signIn and signUp
 │   │   │   └── page.tsx            # Stitch-themed mobile login & registration UI
@@ -217,7 +256,7 @@ sharedrobe/
 │   │   ├── globals.css             # Tailwind v4 @theme design tokens (Parisian Navy & Dusty Lilac)
 │   │   ├── layout.tsx              # Root HTML shell with typography & viewport settings
 │   │   ├── page.tsx                # Server Component: authenticates & prefetches MyDrobe items via SSR
-│   │   └── MyDrobeClient.tsx       # Hydrated client view: in-memory category filter, ShareItemModal trigger
+│   │   └── MyDrobeClient.tsx       # Hydrated client view: in-memory category filter, item detail links, status pills
 │   ├── components/
 │   │   ├── ui/
 │   │   │   ├── FieldCard.tsx       # Stitch-styled chalk form card with labels & captions
@@ -250,7 +289,8 @@ sharedrobe/
 │   └── migrations/
 │       ├── 20261012000000_auth_owner_rls.sql     # Baseline owner_id column & RLS setup
 │       ├── 20261012000001_rls_insert_policy.sql  # Strict RLS (auth.uid() = owner_id) & Storage policies
-│       └── 20261016000000_phase2_social.sql      # Phase 2 Social Engine: profiles, circles, friends, RLS
+│       ├── 20261016000000_phase2_social.sql      # Phase 2 Social Engine: profiles, circles, friends, RLS
+│       └── 20261017000000_sprint2_item_management.sql # Sprint 2: item_status ENUM, borrowed_by, tags constraint
 ├── next.config.ts                  # Allowed dev origins (192.168.1.153, 192.168.*.*, etc.) for mobile LAN dev
 ├── package.json                    # Scripts & dependencies
 └── tsconfig.json                   # Strict TypeScript compiler options
@@ -379,7 +419,7 @@ Run all checks locally with:
 ```bash
 npm run lint         # ESLint 9 (0 errors, 0 warnings)
 npm run typecheck    # TypeScript 5 (No type errors)
-npm test             # QA Advocate unified test suites (33 passing tests)
+npm test             # QA Advocate unified test suites (40 passing tests)
 npm run build        # Next.js 16 Turbopack build (All routes compiled)
 ```
 
@@ -431,8 +471,15 @@ npm run build        # Next.js 16 Turbopack build (All routes compiled)
   ✅ [PASS] 5D: Correctly filters out friends who are already members of circle
   ✅ [PASS] 5E: Gracefully detects when all selected friends are already members
   ✅ [PASS] 5F: Circle added transactional notification safely escapes recipient and circle names
+  ✅ [PASS] 6A: extractStoragePath accurately extracts relative path from Supabase public URL
+  ✅ [PASS] 6B: extractStoragePath accurately strips signature query tokens from signed URLs
+  ✅ [PASS] 6C: extractStoragePath safely returns null on foreign domains or empty inputs
+  ✅ [PASS] 6D: Item status strictly validates against 'Available', 'Lent Out', and 'In Laundry'
+  ✅ [PASS] 6E: Item borrower reference is strictly cleared to null when status is not 'Lent Out'
+  ✅ [PASS] 6F: Tag validation strictly validates against the 7 allowed tag categories
+  ✅ [PASS] 6G: Storage deletion path validation prevents cross-user file deletion attacks
 ==================================================
-🎉 All 19 Social Engine, Circle Friends & Sharing tests PASSED!
+🎉 All 26 Social Engine, Circle Friends, Items & Storage tests PASSED!
 ```
 
 ---
@@ -451,7 +498,9 @@ For any developer or agent running this repository on a fresh Supabase project:
    - Run `supabase/migrations/20261012000000_auth_owner_rls.sql`
    - Run `supabase/migrations/20261012000001_rls_insert_policy.sql`
    - Run `supabase/migrations/20261016000000_phase2_social.sql`
+   - Run `supabase/migrations/20261017000000_sprint2_item_management.sql`
    - Confirm that the `item_category` enum contains: `Tops`, `Bottoms`, `Dresses`, `Outerwear`, `Shoes`, `Bags`, `Accessories`.
+   - Confirm that the `item_status` enum contains: `Available`, `Lent Out`, `In Laundry`.
 3. **Storage Bucket Configuration:**
    - In Supabase Dashboard -> **Storage** -> **Buckets**, confirm bucket `wardrobe` is created and toggled to **Public**.
 4. **Authentication Settings:**
@@ -469,20 +518,17 @@ For any developer or agent running this repository on a fresh Supabase project:
 The following tasks are prioritized for the next development sprints:
 
 ### Sprint 1: ShareDrobe Circles Engine (Phase 2 MVP) — [COMPLETED]
-- **Delivered in Phase 2 (`feat/phase2-friends-and-circles`):**
-  - Database schema & idempotent backfill in `supabase/migrations/20261016000000_phase2_social.sql`.
-  - Anti-recursion security definer functions for safe circle member evaluation.
-  - Circle-aware RLS policy on `public.items`.
-  - Resend transactional email integration with Stitch HTML styling.
-  - 3-tab Community Hub UI in `src/app/sharedrobe/` (My Circles, My Friends, Real-Time Fuzzy Search, Pending Requests banner).
-  - Garment sharing modal (`ShareItemModal.tsx`) with circle checklist and batch sharing.
-  - 13 automated social edge case tests in `scripts/test-social-actions-edge-cases.mjs` (27 total tests across project).
+- Delivered in Phase 2 (`feat/phase2-friends-and-circles`) and Milestone 6 (`feat/add-friends-to-circle`).
 
-### Sprint 2: Wardrobe Item Management & Item Detail View
-- **Item Detail Screen (`/items/[id]`):**
-  - Full-screen item view with high-res image, category badge, and editable tags.
-  - Delete item trigger with confirmation dialog and corresponding storage image cleanup.
-  - Item status toggle: `Available`, `Lent Out`, `In Laundry`.
+### Sprint 2: Wardrobe Item Management & Item Detail View — [COMPLETED]
+- **Delivered in Sprint 2 (`feat/sprint2-item-management`):**
+  - Database schema & constraints (`item_status` ENUM, `borrowed_by`, tags check constraint).
+  - Storage deletion cleanup + typed Server Actions (`updateItemStatus`, `updateItemTags`, `deleteItem`).
+  - Next.js dynamic SSR route `/items/[id]` and `ItemDetailClient.tsx` with Stitch design tokens.
+  - Interactive 7-tag selector, 3-way status toggle, conditional friend borrower selector.
+  - Delete modal with cloud storage object purge.
+  - Feed integration in MyDrobe & ShareDrobe with `<Link href={'/items/${item.id}'}>` and visual status badges ("Lent to [Friend]" in Dusty Lilac, "In Laundry" in Amber).
+  - 40 automated edge-case test validations.
 
 ### Sprint 3: Lookbook Builder ("Fav Outfit")
 - **Fav Outfit Feature:**
