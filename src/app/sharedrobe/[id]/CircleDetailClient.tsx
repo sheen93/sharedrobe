@@ -22,6 +22,9 @@ import {
   Megaphone,
   Siren,
   Activity,
+  ThumbsUp,
+  ThumbsDown,
+  Layers,
 } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import AddFriendsToCircleModal from "@/components/AddFriendsToCircleModal";
@@ -33,6 +36,8 @@ import {
   rejectBorrowRequest,
   removeCircleMember,
 } from "@/app/sharedrobe/actions";
+import { castOutfitVote } from "@/app/outfits/actions";
+import type { OutfitVoteType } from "@/app/outfits/constants";
 import type { CircleActivityType } from "@/app/sharedrobe/constants";
 import { cn } from "@/utils/cn";
 
@@ -72,6 +77,22 @@ export interface CircleBorrowRequestItem {
   created_at: string;
 }
 
+export interface CircleLookbookSummary {
+  id: string;
+  title: string;
+  creatorId: string;
+  creatorName: string;
+  yayCount: number;
+  nayCount: number;
+  myVote: OutfitVoteType | null;
+  items: {
+    id: string;
+    title: string;
+    image_url: string;
+    owner_id: string;
+  }[];
+}
+
 export interface CircleActivityItem {
   id: string;
   circle_id: string;
@@ -81,6 +102,8 @@ export interface CircleActivityItem {
   target_item_id: string | null;
   targetItemTitle: string | null;
   targetItemImageUrl: string | null;
+  target_outfit_id?: string | null;
+  targetOutfit?: CircleLookbookSummary | null;
   message: string | null;
   created_at: string;
 }
@@ -258,6 +281,23 @@ export default function CircleDetailClient({
     router.push(`/items/${item.id}?from=/sharedrobe/${circle.id}`);
   };
 
+  const handleVoteOnLookbook = (outfitId: string, vote: OutfitVoteType) => {
+    setActiveActionId(`${outfitId}-${vote}`);
+    startTransition(async () => {
+      const res = await castOutfitVote(outfitId, vote);
+      setActiveActionId(null);
+      if (res.success) {
+        showFeedback(
+          "success",
+          res.message ?? `Voted ${vote === "yay" ? "👍 Yay" : "👎 Nay"}!`
+        );
+        router.refresh();
+      } else {
+        showFeedback("error", res.error ?? "Could not record vote.");
+      }
+    });
+  };
+
   return (
     <div className="flex min-h-dvh flex-col items-center bg-linen sm:py-6">
       <main className="relative flex w-full max-w-md flex-1 flex-col justify-between bg-buttercream sm:rounded-[32px] sm:border sm:border-border-neutral sm:shadow-2xl">
@@ -313,6 +353,19 @@ export default function CircleDetailClient({
                   Looks
                 </p>
               </div>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between gap-2 border-t border-border-neutral/80 pt-3">
+              <span className="text-[11px] font-medium text-graphite">
+                Want to style a look for circle polling?
+              </span>
+              <Link
+                href={`/outfits/builder?circleId=${circle.id}&from=/sharedrobe/${circle.id}`}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-dusty-lilac px-3 py-1.5 text-xs font-bold text-white shadow-2xs transition hover:opacity-95 active:scale-95"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>+ Build Lookbook</span>
+              </Link>
             </div>
           </div>
 
@@ -919,6 +972,136 @@ export default function CircleDetailClient({
                   {activities.map((act) => {
                     const isPublicNudge = act.action_type === "public_nudge";
                     const isBorrowed = act.action_type === "borrowed_item";
+                    const isSharedOutfit =
+                      act.action_type === "shared_outfit" && act.targetOutfit;
+
+                    if (isSharedOutfit && act.targetOutfit) {
+                      const lookbook = act.targetOutfit;
+                      const nonOwnedCount = lookbook.items.filter(
+                        (i) => i.owner_id !== currentUserId
+                      ).length;
+
+                      return (
+                        <div
+                          key={act.id}
+                          onClick={() =>
+                            router.push(
+                              `/outfits/${lookbook.id}?from=/sharedrobe/${circle.id}`
+                            )
+                          }
+                          className="group cursor-pointer overflow-hidden rounded-2xl border-2 border-dusty-lilac bg-gradient-to-br from-dusty-lilac/25 via-chalk to-buttercream p-4 shadow-md transition hover:border-french-navy/50 hover:shadow-lg"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="inline-flex items-center gap-1.5 rounded-lg bg-dusty-lilac px-2.5 py-1 font-mono text-[9px] font-extrabold uppercase tracking-wider text-white shadow-2xs">
+                              <Layers className="h-3.5 w-3.5" />
+                              LOOKBOOK CARD // YAY OR NAY POLL ✨
+                            </span>
+                            <span className="font-mono text-[10px] font-bold text-muted">
+                              {formatRelativeTime(act.created_at)}
+                            </span>
+                          </div>
+
+                          <div className="mt-2.5 flex items-start justify-between gap-2">
+                            <div>
+                              <h3 className="text-sm font-extrabold text-midnight-slate group-hover:text-french-navy">
+                                {lookbook.title}
+                              </h3>
+                              <p className="mt-0.5 text-[11px] font-medium text-graphite">
+                                Styled by{" "}
+                                <span className="font-bold text-midnight-slate">
+                                  {lookbook.creatorId === currentUserId
+                                    ? "You"
+                                    : lookbook.creatorName}
+                                </span>{" "}
+                                • {lookbook.items.length}{" "}
+                                {lookbook.items.length === 1
+                                  ? "piece"
+                                  : "pieces"}
+                              </p>
+                            </div>
+
+                            <Link
+                              href={`/outfits/${lookbook.id}?from=/sharedrobe/${circle.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-french-navy px-2.5 py-1.5 font-mono text-[10px] font-bold text-white shadow-2xs transition hover:bg-french-navy-hover"
+                            >
+                              <span>
+                                {nonOwnedCount > 0
+                                  ? "Open & Borrow Fit →"
+                                  : "Open Fit →"}
+                              </span>
+                            </Link>
+                          </div>
+
+                          {/* Garment Collage Strip */}
+                          {lookbook.items.length > 0 && (
+                            <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                              {lookbook.items.map((piece) => (
+                                <div
+                                  key={piece.id}
+                                  className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-dusty-lilac/40 bg-buttercream shadow-2xs"
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={piece.image_url}
+                                    alt={piece.title}
+                                    className="h-full w-full object-cover"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Prominent 👍 Yay and 👎 Nay Vote Tally Buttons */}
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="mt-3 grid grid-cols-2 gap-2 border-t border-dusty-lilac/30 pt-3"
+                          >
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              onClick={() =>
+                                handleVoteOnLookbook(lookbook.id, "yay")
+                              }
+                              className={cn(
+                                "flex items-center justify-center gap-1.5 rounded-xl border py-2 text-xs font-extrabold transition active:scale-95",
+                                lookbook.myVote === "yay"
+                                  ? "border-2 border-emerald-600 bg-emerald-600 text-white shadow-xs"
+                                  : "border-border-strong bg-buttercream text-midnight-slate hover:border-emerald-500"
+                              )}
+                            >
+                              {activeActionId === `${lookbook.id}-yay` ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <ThumbsUp className="h-3.5 w-3.5" />
+                              )}
+                              <span>👍 Yay ({lookbook.yayCount})</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              onClick={() =>
+                                handleVoteOnLookbook(lookbook.id, "nay")
+                              }
+                              className={cn(
+                                "flex items-center justify-center gap-1.5 rounded-xl border py-2 text-xs font-extrabold transition active:scale-95",
+                                lookbook.myVote === "nay"
+                                  ? "border-2 border-rose-600 bg-rose-600 text-white shadow-xs"
+                                  : "border-border-strong bg-buttercream text-midnight-slate hover:border-rose-500"
+                              )}
+                            >
+                              {activeActionId === `${lookbook.id}-nay` ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <ThumbsDown className="h-3.5 w-3.5" />
+                              )}
+                              <span>👎 Nay ({lookbook.nayCount})</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
 
                     if (isPublicNudge) {
                       return (

@@ -72,6 +72,7 @@ interface DbCircleActivityRow {
   actor_id: string;
   action_type: CircleActivityType;
   target_item_id: string | null;
+  target_outfit_id: string | null;
   message: string | null;
   created_at: string;
   actor: {
@@ -84,6 +85,26 @@ interface DbCircleActivityRow {
     title: string;
     image_url: string;
   } | null;
+}
+
+interface DbCircleOutfitRow {
+  id: string;
+  creator_id: string;
+  circle_id: string | null;
+  title: string;
+  visibility: string;
+  created_at: string;
+  outfit_items: {
+    item_id: string;
+    items:
+      | { id: string; title: string; image_url: string; owner_id: string }
+      | { id: string; title: string; image_url: string; owner_id: string }[]
+      | null;
+  }[];
+  outfit_votes: {
+    voter_id: string;
+    vote: "yay" | "nay";
+  }[];
 }
 
 export default async function CircleDetailPage({
@@ -124,12 +145,13 @@ export default async function CircleDetailPage({
     redirect("/sharedrobe");
   }
 
-  // 2. Fetch approved circle members, shared items, pending borrow requests, and chronological circle_activity in parallel
+  // 2. Fetch approved circle members, shared items, pending borrow requests, circle_activity, and circle_public outfits in parallel
   const [
     { data: memberRowsData, error: memberErr },
     { data: circleItemsData, error: circleItemsErr },
     { data: borrowRequestsData, error: borrowRequestsErr },
     { data: activityRowsData, error: activityErr },
+    { data: circleOutfitsData, error: outfitsErr },
   ] = await Promise.all([
     supabase
       .from("circle_members")
@@ -211,6 +233,7 @@ export default async function CircleDetailPage({
         actor_id,
         action_type,
         target_item_id,
+        target_outfit_id,
         message,
         created_at,
         actor:actor_id (
@@ -227,6 +250,32 @@ export default async function CircleDetailPage({
       .eq("circle_id", circleId)
       .order("created_at", { ascending: false })
       .limit(40),
+    supabase
+      .from("outfits")
+      .select(`
+        id,
+        creator_id,
+        circle_id,
+        title,
+        visibility,
+        created_at,
+        outfit_items (
+          item_id,
+          items:item_id (
+            id,
+            title,
+            image_url,
+            owner_id
+          )
+        ),
+        outfit_votes (
+          voter_id,
+          vote
+        )
+      `)
+      .eq("circle_id", circleId)
+      .eq("visibility", "circle_public")
+      .order("created_at", { ascending: false }),
   ]);
 
   if (memberErr) {
@@ -240,6 +289,9 @@ export default async function CircleDetailPage({
   }
   if (activityErr) {
     console.error("[CircleDetailPage] Error fetching circle_activity:", activityErr);
+  }
+  if (outfitsErr) {
+    console.error("[CircleDetailPage] Error fetching circle outfits:", outfitsErr);
   }
 
   // Format members list (also build a profile lookup map for item owners)
@@ -331,15 +383,66 @@ export default async function CircleDetailPage({
     }
   });
 
+  // Build lookup map of shared circle_public outfits
+  const rawOutfits = (circleOutfitsData as unknown as DbCircleOutfitRow[]) || [];
+  const outfitLookupMap = new Map<
+    string,
+    NonNullable<CircleActivityItem["targetOutfit"]>
+  >();
+
+  for (const oRow of rawOutfits) {
+    const pieces: {
+      id: string;
+      title: string;
+      image_url: string;
+      owner_id: string;
+    }[] = [];
+
+    for (const oi of oRow.outfit_items ?? []) {
+      const itemObj = Array.isArray(oi.items) ? oi.items[0] : oi.items;
+      if (itemObj && itemObj.id) {
+        pieces.push({
+          id: itemObj.id,
+          title: itemObj.title,
+          image_url: itemObj.image_url,
+          owner_id: itemObj.owner_id,
+        });
+      }
+    }
+
+    const votes = oRow.outfit_votes ?? [];
+    const yayCount = votes.filter((v) => v.vote === "yay").length;
+    const nayCount = votes.filter((v) => v.vote === "nay").length;
+    const myVoteRow = votes.find((v) => v.voter_id === user.id);
+
+    outfitLookupMap.set(oRow.id, {
+      id: oRow.id,
+      title: oRow.title,
+      creatorId: oRow.creator_id,
+      creatorName:
+        profileNameMap.get(oRow.creator_id)?.fullName || "Circle Member",
+      yayCount,
+      nayCount,
+      myVote: myVoteRow?.vote ?? null,
+      items: pieces,
+    });
+  }
+
   // Format chronological activity / drama feed rows
   const rawActivities =
     (activityRowsData as unknown as DbCircleActivityRow[]) || [];
+  const referencedOutfitIds = new Set<string>();
+
   const activities: CircleActivityItem[] = rawActivities.map((act) => {
     const actorName =
       act.actor?.full_name ||
       profileNameMap.get(act.actor_id)?.fullName ||
       act.actor?.email?.split("@")[0] ||
       "Circle Member";
+
+    if (act.target_outfit_id) {
+      referencedOutfitIds.add(act.target_outfit_id);
+    }
 
     return {
       id: act.id,
@@ -350,10 +453,43 @@ export default async function CircleDetailPage({
       target_item_id: act.target_item_id,
       targetItemTitle: act.target_item?.title || null,
       targetItemImageUrl: act.target_item?.image_url || null,
+      target_outfit_id: act.target_outfit_id ?? null,
+      targetOutfit: act.target_outfit_id
+        ? outfitLookupMap.get(act.target_outfit_id) ?? null
+        : null,
       message: act.message,
       created_at: act.created_at,
     };
   });
+
+  // Also ensure any circle_public outfit that didn't have an activity row is included in the feed
+  for (const oRow of rawOutfits) {
+    if (!referencedOutfitIds.has(oRow.id)) {
+      const hydratedOutfit = outfitLookupMap.get(oRow.id);
+      if (hydratedOutfit) {
+        activities.push({
+          id: `outfit-activity-${oRow.id}`,
+          circle_id: circleId,
+          actor_id: oRow.creator_id,
+          actorName: hydratedOutfit.creatorName,
+          action_type: "shared_outfit",
+          target_item_id: null,
+          targetItemTitle: null,
+          targetItemImageUrl: null,
+          target_outfit_id: oRow.id,
+          targetOutfit: hydratedOutfit,
+          message: `✨ ${hydratedOutfit.creatorName} dropped a new lookbook "${oRow.title}" — cast your Yay or Nay!`,
+          created_at: oRow.created_at,
+        });
+      }
+    }
+  }
+
+  // Sort combined activities chronologically descending
+  activities.sort(
+    (a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
 
   return (
     <CircleDetailClient

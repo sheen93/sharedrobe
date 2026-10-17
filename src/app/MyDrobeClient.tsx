@@ -129,6 +129,29 @@ export default function MyDrobeClient({ initialItems: items }: MyDrobeClientProp
           className="mt-3"
         />
 
+        {/* Lookbook Builder Studio CTA Card */}
+        <Link
+          href="/outfits/builder?from=/"
+          className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-dusty-lilac/50 bg-gradient-to-r from-dusty-lilac/20 via-chalk to-buttercream px-3.5 py-3 shadow-xs transition hover:border-dusty-lilac hover:shadow-sm active:scale-[0.99]"
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-dusty-lilac text-white shadow-xs">
+              <Sparkles className="h-4 w-4" />
+            </span>
+            <div>
+              <p className="text-xs font-extrabold text-midnight-slate">
+                Lookbook Studio // Fav Outfits ✨
+              </p>
+              <p className="text-[11px] text-muted">
+                Style looks from your closet & friends&apos; circle racks
+              </p>
+            </div>
+          </div>
+          <span className="shrink-0 rounded-xl bg-french-navy px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-white shadow-xs">
+            Build Look →
+          </span>
+        </Link>
+
         {/* Success toast / feedback banner */}
         {shareFeedback && (
           <div className="mt-3 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-2.5 text-xs font-semibold text-emerald-900 animate-in fade-in duration-200">

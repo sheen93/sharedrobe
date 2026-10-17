@@ -20,6 +20,7 @@ export const CIRCLE_ACTIVITY_TYPES = [
   "shared_item",
   "borrowed_item",
   "public_nudge",
+  "shared_outfit",
 ] as const;
 
 export type CircleActivityType = (typeof CIRCLE_ACTIVITY_TYPES)[number];

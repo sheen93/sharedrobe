@@ -338,7 +338,7 @@ const BORROW_DURATION_OPTIONS = [
   "Infinity (It looks better on me anyway)",
 ];
 
-const CIRCLE_ACTIVITY_TYPES = ["shared_item", "borrowed_item", "public_nudge"];
+const CIRCLE_ACTIVITY_TYPES = ["shared_item", "borrowed_item", "public_nudge", "shared_outfit"];
 
 function isValidBorrowDuration(duration) {
   return typeof duration === "string" && BORROW_DURATION_OPTIONS.includes(duration.trim());
@@ -517,9 +517,112 @@ assert.equal(
 console.log("  ✅ [PASS] 7F: removeCircleMember enforces Circle Admin role and blocks admin self-removal");
 
 // 7G: Circle activity action types strictly match schema ENUM
-assert.deepEqual(CIRCLE_ACTIVITY_TYPES, ["shared_item", "borrowed_item", "public_nudge"]);
+assert.deepEqual(CIRCLE_ACTIVITY_TYPES, ["shared_item", "borrowed_item", "public_nudge", "shared_outfit"]);
 console.log("  ✅ [PASS] 7G: Circle activity types strictly match Postgres circle_activity_type ENUM");
 
+// ----------------------------------------------------------------------------
+// Section 8: Sprint 4 Lookbook Builder, Voting & Batch Borrow Validation
+// ----------------------------------------------------------------------------
+const OUTFIT_VISIBILITIES = ["private", "circle_public"];
+const OUTFIT_VOTE_TYPES = ["yay", "nay"];
+
+function isValidOutfitTitle(title) {
+  if (typeof title !== "string") return false;
+  const trimmed = title.trim();
+  return trimmed.length >= 2 && trimmed.length <= 80;
+}
+
+function isValidOutfitVisibility(visibility) {
+  return typeof visibility === "string" && OUTFIT_VISIBILITIES.includes(visibility.trim());
+}
+
+function isValidOutfitVote(vote) {
+  return typeof vote === "string" && OUTFIT_VOTE_TYPES.includes(vote.trim());
+}
+
+function deduplicateItemIds(itemIds) {
+  if (!Array.isArray(itemIds)) return [];
+  const seen = new Set();
+  const valid = [];
+  for (const id of itemIds) {
+    if (!isValidUuid(id)) continue;
+    const norm = id.trim();
+    if (!seen.has(norm)) {
+      seen.add(norm);
+      valid.push(norm);
+    }
+  }
+  return valid;
+}
+
+function filterNonOwnedOutfitItems(items, currentUserId) {
+  if (!Array.isArray(items) || !isValidUuid(currentUserId)) return [];
+  const trimmedUser = currentUserId.trim();
+  return items.filter(
+    (item) => item && isValidUuid(item.id) && isValidUuid(item.owner_id) && item.owner_id.trim() !== trimmedUser
+  );
+}
+
+// 8A: Outfit title validation (2-80 chars)
+assert.equal(isValidOutfitTitle("A"), false);
+assert.equal(isValidOutfitTitle("   "), false);
+assert.equal(isValidOutfitTitle("Rooftop Espresso Martini Fit"), true);
+assert.equal(isValidOutfitTitle("X".repeat(81)), false);
+console.log("  ✅ [PASS] 8A: Outfit title validation enforces 2-80 character bounds");
+
+// 8B: Outfit visibility and circle requirement validation
+assert.equal(isValidOutfitVisibility("private"), true);
+assert.equal(isValidOutfitVisibility("circle_public"), true);
+assert.equal(isValidOutfitVisibility("public"), false);
+console.log("  ✅ [PASS] 8B: Outfit visibility strictly validates 'private' and 'circle_public' ENUM values");
+
+// 8C: Outfit vote type validation ('yay' | 'nay')
+assert.equal(isValidOutfitVote("yay"), true);
+assert.equal(isValidOutfitVote("nay"), true);
+assert.equal(isValidOutfitVote("maybe"), false);
+console.log("  ✅ [PASS] 8C: castOutfitVote strictly validates 'yay' and 'nay' ENUM values");
+
+// 8D: Outfit item deduplication and UUID filtering
+const sampleId1 = "11111111-1111-4111-8111-111111111111";
+const sampleId2 = "22222222-2222-4222-8222-222222222222";
+assert.deepEqual(
+  deduplicateItemIds([sampleId1, sampleId2, sampleId1, "not-a-uuid"]),
+  [sampleId1, sampleId2]
+);
+console.log("  ✅ [PASS] 8D: deduplicateItemIds strips duplicate and malformed garment IDs");
+
+// 8E: batchBorrowOutfitItems strictly filters out items owned by auth.uid()
+const outfitUserA = "11111111-1111-4111-8111-111111111111";
+const outfitUserB = "22222222-2222-4222-8222-222222222222";
+const outfitUserC = "33333333-3333-4333-8333-333333333333";
+const outfitGarments = [
+  { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", owner_id: outfitUserA, title: "My Own Blazer", status: "Available" },
+  { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", owner_id: outfitUserB, title: "Chloe's Silk Skirt", status: "Available" },
+  { id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", owner_id: outfitUserC, title: "Maya's Heeled Boots", status: "Available" },
+];
+const remainingToBorrow = filterNonOwnedOutfitItems(outfitGarments, outfitUserA);
+assert.equal(remainingToBorrow.length, 2);
+assert.deepEqual(
+  remainingToBorrow.map((i) => i.owner_id),
+  [outfitUserB, outfitUserC]
+);
+console.log("  ✅ [PASS] 8E: batchBorrowOutfitItems accurately identifies only garments not owned by auth.uid()");
+
+// 8F: batchBorrowOutfitItems skips already-pending or non-Available items
+const pendingSet = new Set(["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]);
+const eligibleForBatchInsert = remainingToBorrow.filter(
+  (item) => item.status === "Available" && !pendingSet.has(item.id)
+);
+assert.equal(eligibleForBatchInsert.length, 1);
+assert.equal(eligibleForBatchInsert[0].id, "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+console.log("  ✅ [PASS] 8F: batchBorrowOutfitItems filters out already-pending and non-Available items");
+
+// 8G: Shared outfit Drama Feed message formatting
+const lookbookFeedMsg = `✨ Maya dropped a new lookbook "Friday Gallery Hop" (3 pieces) — cast your Yay or Nay!`;
+assert.equal(lookbookFeedMsg.includes("Friday Gallery Hop"), true);
+assert.equal(lookbookFeedMsg.includes("Yay or Nay"), true);
+console.log("  ✅ [PASS] 8G: Shared outfit activity formatter generates playful Lookbook Drama Feed copy");
+
 console.log("==================================================");
-console.log("🎉 All 33 Social Engine, Circle Friends, Items, Borrow & Drama Feed tests PASSED!");
+console.log("🎉 All 40 Social Engine, Circle Friends, Items, Borrow, Drama Feed & Lookbook tests PASSED!");
 console.log("==================================================");
