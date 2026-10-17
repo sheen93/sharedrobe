@@ -63,8 +63,9 @@ export default function ProfileClient({
   return (
     <div className="flex min-h-dvh flex-col items-center bg-linen sm:py-6">
       {/* Responsive App Shell: Full-width on mobile devices, centered card on desktops */}
-      <main className="flex w-full max-w-md flex-1 flex-col bg-buttercream p-4 pb-28 sm:rounded-[32px] sm:border sm:border-border-neutral sm:p-5 sm:shadow-2xl">
-        {/* App Header */}
+      <main className="relative flex w-full max-w-md flex-1 flex-col justify-between bg-buttercream sm:rounded-[32px] sm:border sm:border-border-neutral sm:shadow-2xl">
+        <div className="flex-1 p-4 sm:p-5 pb-8 sm:pb-8">
+          {/* App Header */}
         <ScreenHeader
           meta="USER // ACCOUNT"
           title="Profile"
@@ -271,10 +272,11 @@ export default function ProfileClient({
             </form>
           </div>
         </div>
-      </main>
+      </div>
 
-      {/* Persistent Bottom Nav with Profile active */}
+      {/* Persistent Bottom Nav Docked as Part of the Screen */}
       <BottomNav />
-    </div>
+    </main>
+  </div>
   );
 }

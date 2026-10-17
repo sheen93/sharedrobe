@@ -215,6 +215,10 @@ This document serves as an exhaustive, definitive record of every engineering de
   - Wrapped wardrobe cards in MyDrobe (`src/app/MyDrobeClient.tsx`) and circle shared item previews in ShareDrobe (`src/app/sharedrobe/SharedrobeClient.tsx`) with `<Link href={'/items/${item.id}'}>`.
   - Added visual status badges: small Dusty Lilac pill saying `"Lent to [Friend Name]"` and Amber pill saying `"In Laundry"` if status is not `'Available'`.
   - Preserved independent action buttons (Share to Circle) using `stopPropagation` / `preventDefault`.
+- **Part 5: Docked Screen Navigation & Layout Polish (`BottomNav.tsx` across all screens):**
+  - Converted `BottomNav` from a disconnected floating capsule (`fixed bottom-3 left-4 right-4`) into an integrated bottom navigation bar (`sticky bottom-0 w-full sm:rounded-b-[31px]`) docked directly inside the `<main>` card container.
+  - Added dedicated inner content containers (`pb-8 sm:pb-8`) across `MyDrobeClient.tsx`, `ItemDetailClient.tsx`, `SharedrobeClient.tsx`, and `ProfileClient.tsx`.
+  - Permanently resolved the Delete button occlusion on `/items/[id]` and prevented the floating nav bar from covering bottom wardrobe cards on the homepage (`/`).
 - **QA Verification & Edge Case Matrix:**
   - Expanded `scripts/test-social-actions-edge-cases.mjs` with Section 6 (7 new tests verifying storage path extraction, signed token stripping, status transitions, borrower clearing, tag constraints, and storage cross-user deletion protection).
   - Total automated tests increased from 33 to 40 passing tests (14 upload + 26 social/item management).

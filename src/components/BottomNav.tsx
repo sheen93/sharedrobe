@@ -21,7 +21,7 @@ export default function BottomNav({ className }: BottomNavProps) {
     <nav
       aria-label="Main Navigation"
       className={cn(
-        "fixed bottom-3 left-4 right-4 z-40 mx-auto flex max-w-md items-center justify-between rounded-2xl bg-french-navy px-6 py-2.5 text-white shadow-xl",
+        "sticky bottom-0 z-30 mt-auto flex w-full items-center justify-between border-t border-border-neutral/30 bg-french-navy px-6 py-2.5 text-white shadow-lg sm:rounded-b-[31px]",
         className
       )}
     >
