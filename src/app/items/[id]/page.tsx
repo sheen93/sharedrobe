@@ -28,7 +28,7 @@ export default async function ItemDetailPage({ params }: ItemPageProps) {
     redirect("/login");
   }
 
-  // 1. Fetch item with borrower and owner profiles
+  // 1. Fetch item with borrower profile
   const { data: itemData, error: itemErr } = await supabase
     .from("items")
     .select(`
@@ -40,14 +40,8 @@ export default async function ItemDetailPage({ params }: ItemPageProps) {
       tags,
       status,
       borrowed_by,
-      is_sharable,
       created_at,
       borrower:borrowed_by (
-        id,
-        full_name,
-        email
-      ),
-      owner:owner_id (
         id,
         full_name,
         email
@@ -57,10 +51,36 @@ export default async function ItemDetailPage({ params }: ItemPageProps) {
     .maybeSingle();
 
   if (itemErr || !itemData) {
+    if (itemErr) {
+      console.error("[ItemDetailPage] Error fetching item:", itemErr);
+    }
     notFound();
   }
 
   const isOwner = user.id === itemData.owner_id;
+
+  // 2. Fetch owner profile
+  let ownerName = "Drobe Member";
+  if (itemData.owner_id) {
+    if (isOwner) {
+      ownerName =
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        user.email ||
+        "You";
+    } else {
+      const { data: ownerProfile } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .eq("id", itemData.owner_id)
+        .maybeSingle();
+
+      if (ownerProfile) {
+        ownerName =
+          ownerProfile.full_name || ownerProfile.email || "Drobe Member";
+      }
+    }
+  }
 
   // 2. If owner, fetch connected friends to populate the "Lent Out" borrower dropdown
   const friendsList: FriendOption[] = [];
@@ -106,11 +126,10 @@ export default async function ItemDetailPage({ params }: ItemPageProps) {
   }
 
   const borrower = itemData.borrower as unknown as ProfileRef | null;
-  const owner = itemData.owner as unknown as ProfileRef | null;
 
   const item: ItemDetailData = {
     id: itemData.id,
-    ownerId: itemData.owner_id,
+    ownerId: itemData.owner_id || "",
     title: itemData.title,
     category: itemData.category,
     imageUrl: itemData.image_url,
@@ -119,7 +138,7 @@ export default async function ItemDetailPage({ params }: ItemPageProps) {
       (itemData.status as "Available" | "Lent Out" | "In Laundry") || "Available",
     borrowedBy: itemData.borrowed_by,
     borrowerName: borrower?.full_name || borrower?.email || null,
-    ownerName: owner?.full_name || "Drobe Member",
+    ownerName,
     createdAt: itemData.created_at,
   };
 
