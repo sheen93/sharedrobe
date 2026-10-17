@@ -540,27 +540,232 @@ The following tasks are prioritized for the next development sprints:
 
 ---
 
-## 9. Multi-Agent System Onboarding & Quick-Start Cheatsheet
+## 9. Multi-Agent Team Governance, Playbooks & Gated Protocol Manual
 
-For any multi-agent system or incoming developer continuing development on Share Drobe:
+This section serves as the formal operational manual for any human engineer, autonomous agent, or multi-agent swarm picking up the Share Drobe codebase in a new session. It specifies the personas, playbooks, standard operating procedures, and gated quality protocols that govern all engineering work on this repository.
 
-### 9.1 Required Agent Roles & Governance
-- **Lead Architect:** Adhere strictly to the Next.js 16 App Router architecture (`src/proxy.ts`, Server Components for initial fetches, Server Actions for mutations).
-- **Frontend Engineer:** Maintain the Google Stitch design tokens in `src/app/globals.css` (`Buttercream`, `Chalk`, `French Navy`, `Dusty Lilac`, `Midnight Slate`). All mobile screens must use full-bleed responsive cards with `sm:` desktop framing.
-- **QA Advocate:** Every new feature or refactor must be accompanied by edge-case test coverage in `scripts/test-upload-edge-cases.mjs` or dedicated test scripts.
+---
 
-### 9.2 Development Commands
-```bash
-# Start dev server bound to LAN (accessible via desktop and mobile Wi-Fi)
-npm run dev -- -H 0.0.0.0
+### 9.1 Multi-Agent Core Roster & Personas (`.antigravity/agents/`)
 
-# Run full pre-PR validation gate (must pass with 0 errors before any commit/merge)
-npm run lint && npm run typecheck && npm test && npm run build
+When executing sprints or complex features, the system adopts distinct agent personas defined in `.antigravity/agents/`. Each persona has dedicated responsibilities, boundaries, and handoff criteria:
+
+| Persona | Source File | Core Role & Operational Mandate |
+| :--- | :--- | :--- |
+| **`ProjectManager`** (The Lead Shipwright) | `01_ProjectManager.md` | **Orchestrator & Gatekeeper:** Deconstructs user requirements into sequential 4-part sprints. Defines scope, enforces the Gated Workflow Protocol, halts execution at each phase gate, coordinates handoffs between personas, and requires explicit user and QA approval before advancing. |
+| **`LeadArchitect`** | `02_LeadArchitect.md` | **System Topology & Standards:** Owns the Next.js 16 App Router architecture, Server Component vs. Client Component boundaries, RLS security architecture, and framework boundary rules (e.g., Turbopack `"use server"` export constraints vs. constants separation). |
+| **`ProductDesigner`** | `03_ProductDesigner.md` | **Design System & UX Flows:** Enforces Google Stitch design tokens (`Buttercream`, `Chalk`, `French Navy`, `Dusty Lilac`, `Midnight Slate`), mobile-first touch ergonomics, progressive disclosure, and eliminates dead ends or occlusions in navigation. |
+| **`FrontendEngineer`** | `04_FrontendEngineer.md` | **Client Implementation:** Authors React 19 Client Components, accessible dialog modals (`aria-modal`), full-bleed responsive cards with `sm:` desktop framing, interactive selectors, dynamic pills, and docked navigation layouts. |
+| **`BackendEngineer`** | `05_BackendEngineer.md` | **Data Access & Infrastructure:** Authors PostgreSQL migrations, table schemas, ENUMs, check constraints, `SECURITY DEFINER` anti-recursion functions, Supabase Storage purge routines, and strictly-typed Server Actions. |
+| **`QualityAdvocate`** | `08_QualityAdvocate.md` | **Quality Verification & Gatekeeper:** Audits code for edge cases, error boundaries, input validation, and security vulnerabilities. Authors automated regression suites (`scripts/test-*.mjs`). Issues the formal `[QA APPROVED]` stamp required to clear each gate. |
+| **`DevopSreSpecialist`** | `07_DevopSreSpecialist.md` | **Environment & Build Integrity:** Manages dev server LAN configuration (`allowedDevOrigins`), CI/pre-PR validation pipelines (`validate-and-pr.sh`), TypeScript compilation, and Turbopack production builds. |
+
+---
+
+### 9.2 Engineering Playbook Enforcement (`.antigravity/playbooks/`)
+
+All agents must strictly follow the standards defined in the project playbooks:
+
+1. **Stack Standardization (`02-preferred-stacks.md`):**
+   - **Frontend:** Next.js 16 (App Router, Turbopack) + React 19 + TypeScript 5.
+   - **Styling:** Tailwind CSS v4 using `@theme` tokens in `src/app/globals.css`.
+   - **Backend / DB:** Supabase PostgreSQL with `@supabase/ssr` async cookie management and Row-Level Security (RLS).
+   - **Storage:** Supabase Storage (`wardrobe` bucket) scoped to `${user.id}/...` user paths.
+   - **Transactional Email:** Resend SDK with defensive, non-blocking error boundaries.
+
+2. **Coding Standards (`04-coding-standards.md`):**
+   - **Zero `any` Policy:** All props, database payloads, server action responses, and utilities must have explicit TypeScript interfaces.
+   - **No Placeholder Code:** Every component and server action must be fully implemented and runnable.
+   - **Server Action Segregation:** Under Next.js 16 / Turbopack, files marked with `"use server"` must **strictly export async functions**. Constants, helper types, and synchronous utilities must be extracted into sibling files (e.g., `constants.ts`).
+   - **Defensive Error Boundaries:** External I/O (Storage, Resend email, DB queries) must use try/catch blocks that return structured `{ success: boolean, error?: string }` objects rather than throwing unhandled exceptions.
+
+3. **UI / UX Rules (`05-ui-ux-rules.md`):**
+   - **Google Stitch Design Language:** Primary canvas in Buttercream (`#FCFBF7`), card surfaces in Chalk (`#F0EFE9`), primary brand in French Navy (`#1D2A44`), secondary accents and badges in Dusty Lilac (`#9683B8`), text in Midnight Slate (`#121926`).
+   - **Mobile-First Full-Bleed Containers:** Mobile viewports must extend to screen edges without double-bezel nesting, adapting gracefully to centered `max-w-md sm:rounded-[32px] sm:shadow-2xl` shells on tablet/desktop.
+   - **Docked Navigation (No Floating Occlusion):** Bottom navigation (`BottomNav.tsx`) must be docked inside the main container (`sticky bottom-0 w-full sm:rounded-b-[31px]`), ensuring critical CTA buttons (e.g., "Delete Garment", "Add Item") and bottom feed cards remain 100% visible and clickable.
+   - **Accessible Form Controls:** All inputs must have associated labels, clear placeholders, loading spinners during transitions, and visible inline error alerts.
+
+4. **Definition of Done (`08-definition-of-done.md`):**
+   No task or sprint is complete until:
+   - 0 ESLint errors and warnings (`npm run lint`).
+   - 0 TypeScript compiler errors (`npm run typecheck`).
+   - 100% automated test pass rate across all QA test suites (`npm test`).
+   - Successful Next.js 16 Turbopack production build (`npm run build`).
+   - Clean, reproducible documentation and clean git history on `main`.
+
+---
+
+### 9.3 The 4-Part Gated Workflow Protocol
+
+The Gated Workflow Protocol is the strict operational procedure governing every sprint. It prevents scope creep, enforces rigorous quality control, and maintains human-in-the-loop governance for database and infrastructure changes.
+
+```
+       ┌────────────────────────────────────────────────────────┐
+       │   Sprint Kickoff & Task Deconstruction (PM + Team)     │
+       └───────────────────────────┬────────────────────────────┘
+                                   │
+                   ┌───────────────▼───────────────┐
+                   │  Part 1: Database Architecture │
+                   │  (LeadArchitect + Backend)     │
+                   └───────────────┬───────────────┘
+                                   │
+                     WAITING FOR QA APPROVAL
+                                   │
+                     [QA APPROVED] by QA_Advocate
+                                   │
+                     [GATE 1 HALT] PM halts & prompts User:
+                     "Run migration SQL in Supabase Dashboard"
+                                   │
+                   User: "Approved, proceed to Part 2"
+                                   │
+                   ┌───────────────▼───────────────┐
+                   │  Part 2: Data Access & Storage │
+                   │  (BackendEngineer)             │
+                   └───────────────┬───────────────┘
+                                   │
+                     WAITING FOR QA APPROVAL
+                                   │
+                     [QA APPROVED] by QA_Advocate
+                                   │
+                     [GATE 2 HALT] PM halts for User Review
+                                   │
+                   User: "Approved, proceed to Part 3"
+                                   │
+                   ┌───────────────▼───────────────┐
+                   │  Part 3: Feature UI & Client   │
+                   │  (FrontendEngineer)            │
+                   └───────────────┬───────────────┘
+                                   │
+                     WAITING FOR QA APPROVAL
+                                   │
+                     [QA APPROVED] by QA_Advocate
+                                   │
+                     [GATE 3 HALT] PM halts for User UI Review
+                                   │
+                   User: "Approved, proceed to Part 4"
+                                   │
+                   ┌───────────────▼───────────────┐
+                   │  Part 4: Feed & Nav Integration│
+                   │  (FrontendEngineer + DevOps)   │
+                   └───────────────┬───────────────┘
+                                   │
+                     WAITING FOR QA APPROVAL
+                                   │
+                     [QA APPROVED] by QA_Advocate
+                                   │
+                     [GATE 4 HALT] PM Final Review,
+                     Run 4-Step Validation Suite,
+                     Commit & Push to GitHub
 ```
 
-### 9.3 Key Architectural Guardrails
-1. **Never use singular category strings:** The Postgres ENUM `item_category` is strictly plural (`Tops`, `Bottoms`, `Dresses`, `Outerwear`, `Shoes`, `Bags`, `Accessories`). Any insert with a singular string will be rejected with code `22P02`.
-2. **Never instantiate `createBrowserClient` unbound inside client components:** Always import `createClient` from `@/utils/supabase/client` which provides the singleton instance. Re-instantiating `createBrowserClient` causes `navigator.locks` contention and deadlocks auth requests on mobile browsers.
-3. **Always fetch initial data in Server Components:** In Next.js 16, prefer async Server Components with `@/utils/supabase/server` for initial data queries, and pass preloaded items down to interactive client components to guarantee instant hydration without loading spinners.
-4. **Preserve RLS Integrity:** Every insert into `public.items` must explicitly include `owner_id: user.id`. The active RLS policies strictly enforce `auth.uid() = owner_id`.
+#### Protocol Rules & Handshake Syntax:
+1. **Sequential Execution Only:** Work proceeds strictly through Part 1 → Part 2 → Part 3 → Part 4. Engineers must never jump ahead or bundle parts.
+2. **QA Checkpoint (`WAITING FOR QA APPROVAL`):** Upon finishing the code for any part, the `ProjectManager` must announce:
+   ```
+   WAITING FOR QA APPROVAL
+   ```
+3. **QA Advocate Review (`[QA APPROVED]`):** The `QA_Advocate` must review the implementation for syntax errors, RLS loopholes, edge cases, error handling, and test coverage. Once satisfied, the `QA_Advocate` issues:
+   ```
+   [QA APPROVED]
+   ```
+   Accompanied by an explicit breakdown of verified edge cases.
+4. **PM Gate Halt (`[GATE X HALT]`):** Immediately following QA approval, the `ProjectManager` must **HALT execution** and prompt the user. If manual cloud configuration is required (e.g., executing a migration SQL file in the Supabase Dashboard SQL Editor), the PM must provide exact copy-paste SQL and verify instructions:
+   ```
+   [GATE X HALT]
+   User action required: Please execute the migration SQL in your Supabase Dashboard SQL Editor.
+   Reply "Approved, proceed to Part X" to continue.
+   ```
+5. **Strict User Gate Clearance:** The agent team **MUST NOT** proceed to the next part until the user replies with explicit approval (e.g., `"Approved, proceed to Part 2"`).
+
+---
+
+### 9.4 Real-World Case Studies & Architectural Solutions
+
+The following four case studies illustrate how the multi-agent team collaborated across Sprints 1 and 2 to solve complex bugs and architectural challenges:
+
+#### Case Study 1: Plural Postgres ENUM Alignment Bug
+- **Issue:** Garment uploads were failing with Postgres error code `22P02` (`invalid input value for enum item_category`).
+- **Diagnosis (LeadArchitect + QA_Advocate):** The Postgres ENUM type was created as `item_category` with plural values: `'Tops'`, `'Bottoms'`, `'Dresses'`, `'Outerwear'`, `'Shoes'`, `'Bags'`, `'Accessories'`. The frontend form was submitting singular strings (`Top`, `Bottom`, `Dress`).
+- **Resolution (FrontendEngineer):** Standardized `VALID_ENUM_CATEGORIES` in `src/utils/upload-errors.ts` and updated `<AddItemModal />` and category filters to strictly use plural ENUM values while providing descriptive garment labels.
+- **Verification (QA_Advocate):** Added automated test scenarios in `scripts/test-upload-edge-cases.mjs` verifying that all 7 plural ENUM values pass and singular values are caught and flagged before database submission.
+
+#### Case Study 2: Next.js 16 Turbopack Server Action Segregation
+- **Issue:** After introducing `src/app/items/actions.ts`, Next.js 16 Turbopack crashed with the error:
+  `"Only async functions are allowed to be exported in a 'use server' file."`
+- **Diagnosis (LeadArchitect):** `actions.ts` had exported non-async constant arrays (`ALLOWED_ITEM_STATUSES`, `ALLOWED_ITEM_TAGS`) and helper functions (`extractStoragePath`, `isValidUuid`). Next.js 16 strictly disallows exporting non-async functions or values from Server Action modules.
+- **Resolution (BackendEngineer):** Created `src/app/items/constants.ts` to house all static constants, TypeScript types, and synchronous pure helpers. `actions.ts` now strictly contains async Server Actions.
+- **Verification (DevopsSreSpecialist + QA_Advocate):** Ran `npm run build` with Turbopack compiler — compiled cleanly with 0 route compilation errors.
+
+#### Case Study 3: Mobile Bottom Navigation Occlusion Fix
+- **Issue:** On the item detail page (`/items/[id]`) and home wardrobe feed (`/`), users reported that the "Delete Garment from Closet" button and bottom wardrobe cards were obscured by the bottom navigation bar.
+- **Diagnosis (ProductDesigner + FrontendEngineer):** `BottomNav.tsx` was implemented as a floating overlay capsule using `fixed bottom-3 left-4 right-4 z-40`. On mobile browsers with bottom URL bars, the floating nav covered up interactive buttons and content at the bottom of the scroll container.
+- **Resolution (FrontendEngineer):** Converted `BottomNav` into a docked sticky component (`sticky bottom-0 w-full sm:rounded-b-[31px] z-40 bg-buttercream/95 backdrop-blur-md border-t border-border-neutral`). Standardized an inner scroll wrapper (`pb-8 sm:pb-8`) across all main views (`MyDrobeClient`, `ItemDetailClient`, `SharedrobeClient`, `ProfileClient`).
+- **Verification (QA_Advocate):** Inspected mobile layout geometry — navigation is now docked cleanly at the bottom of the card with zero occlusion of the Delete button or feed items.
+
+#### Case Study 4: Storage Deletion Security & Ownership Validation
+- **Issue:** When deleting an item, deleting only the database record left orphaned image files in the Supabase Storage bucket, consuming storage quota and risking privacy leaks. Additionally, malicious users could attempt to pass a foreign image URL to delete another user's files.
+- **Diagnosis (LeadArchitect + BackendEngineer):** Storage deletion must be atomic and verified against the authenticated user ID before any file or database purge occurs.
+- **Resolution (BackendEngineer):** Built `deleteItem(itemId, imageUrl)`:
+  1. Validates `auth.uid() = owner_id` via Postgres query.
+  2. Extracts the relative file path using `extractStoragePath(imageUrl)`.
+  3. Strips query tokens from signed URLs to ensure clean object paths.
+  4. Enforces path prefix validation: confirms that the path strictly starts with `${user.id}/`, completely preventing cross-user file deletion attacks.
+  5. Purges the file from the `wardrobe` storage bucket first, and only then deletes the database row.
+- **Verification (QA_Advocate):** Wrote Section 6 tests in `scripts/test-social-actions-edge-cases.mjs` verifying storage path extraction, signed token stripping, foreign domain rejection, and cross-user deletion blocking.
+
+---
+
+## 10. Multi-Agent Session Resumption & Continuity Guide
+
+If a session drops or a fresh Antigravity instance begins, the new agent team can immediately resume work by following this 5-step operational protocol:
+
+### Step 1: Scan Workspace Context & Directives
+1. Read `.antigravityrules` in the repository root.
+2. Inspect `.antigravity/agents/` to load persona definitions.
+3. Review `.antigravity/playbooks/` to review stack standards and definition of done.
+4. Read `PROGRESS_REPORT.md` (this file) to verify the current milestone, recent git commits, and open tasks.
+
+### Step 2: Run Baseline Health Check
+Before writing any new code, execute the full validation suite to verify that the existing codebase is completely green:
+```bash
+npm run lint         # Must report 0 errors, 0 warnings
+npm run typecheck    # Must report 0 TypeScript errors
+npm test             # Must report 40/40 passing tests
+npm run build        # Must compile all routes successfully with Turbopack
+```
+
+### Step 3: Branch Creation
+Create a new feature branch following the established naming convention:
+```bash
+git checkout -b feat/sprintX-<feature-name>
+```
+
+### Step 4: PM Task Deconstruction into 4 Sequential Parts
+The `ProjectManager` persona must take the user's feature request and break it down into the standard 4 parts:
+- **Part 1: Database Architecture** (Schemas, ENUMs, RLS policies, migrations)
+- **Part 2: Data Access & Business Logic** (Server Actions, storage handlers, error mappers)
+- **Part 3: Feature UI & Client Interactivity** (SSR pages, client components, Stitch design tokens)
+- **Part 4: Feed Integration & Polish** (Links, badges, navigation docking, end-to-end testing)
+
+### Step 5: Execute the Gated Protocol
+Follow the exact protocol sequence:
+1. Implement Part 1.
+2. PM outputs `WAITING FOR QA APPROVAL`.
+3. QA_Advocate audits and outputs `[QA APPROVED]`.
+4. PM halts execution with `[GATE 1 HALT]` and provides manual Supabase SQL instructions to the user.
+5. Wait for the user to reply: `"Approved, proceed to Part 2"`.
+6. Repeat for Parts 2, 3, and 4.
+7. Upon completion of Part 4, run the full validation suite, update `PROGRESS_REPORT.md`, stage, commit, and push to GitHub.
+
+---
+
+### Key Architectural Guardrails (Do Not Violate)
+
+1. **Category ENUMs Are Plural:** Never use singular category strings (`Top`, `Bottom`, `Dress`). The Postgres ENUM `item_category` strictly expects: `'Tops'`, `'Bottoms'`, `'Dresses'`, `'Outerwear'`, `'Shoes'`, `'Bags'`, `'Accessories'`.
+2. **Singleton Browser Client:** Never call `createBrowserClient` directly inside React components. Always import `createClient` from `@/utils/supabase/client` to use the shared singleton, preventing mobile `navigator.locks` token deadlocks.
+3. **SSR Data Prefetching:** Always prefetch initial data in Server Components (`page.tsx`) using `@/utils/supabase/server` with async `cookies()`. Pass preloaded items down to client components as initial props to ensure instant page load without spinners.
+4. **Server Actions File Purity:** Files with `"use server"` must export **only async functions**. Extract all constants, types, and synchronous helpers into separate non-server files (e.g., `constants.ts`).
+5. **Docked Navigation:** Never create a floating overlay bottom nav on mobile screens. Dock `BottomNav` inside the main container (`sticky bottom-0`) with bottom padding on the content wrapper to prevent covering CTAs.
+6. **Mandatory Edge Case Testing:** Every backend action or UI validation must have corresponding unit/integration edge-case tests in `scripts/test-*.mjs` integrated into `npm test`.
+
 
