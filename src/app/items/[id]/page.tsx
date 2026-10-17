@@ -90,8 +90,15 @@ export default async function ItemDetailPage({
     }
   }
 
-  // 2. If owner, fetch connected friends to populate the "Lent Out" borrower dropdown
+  // 3. If owner, fetch connected friends to populate the "Lent Out" borrower dropdown.
+  //    If non-owner, fetch shared circle context and any pending borrow request for the Borrow Request button.
   const friendsList: FriendOption[] = [];
+  let borrowCircle: { id: string; name: string } | null = null;
+  let initialPendingBorrowRequest: {
+    id: string;
+    durationIntent: string;
+  } | null = null;
+
   if (isOwner) {
     const { data: friendshipsData } = await supabase
       .from("friendships")
@@ -125,6 +132,51 @@ export default async function ItemDetailPage({
         });
       }
     });
+  } else {
+    interface DbSharedCircleRow {
+      circle_id: string;
+      circle: { id: string; name: string } | null;
+    }
+
+    const [{ data: sharedCirclesData }, { data: pendingReqData }] =
+      await Promise.all([
+        supabase
+          .from("circle_items")
+          .select("circle_id, circle:circle_id (id, name)")
+          .eq("item_id", id),
+        supabase
+          .from("borrow_requests")
+          .select("id, circle_id, duration_intent, status")
+          .eq("item_id", id)
+          .eq("requester_id", user.id)
+          .eq("status", "pending")
+          .maybeSingle(),
+      ]);
+
+    const sharedCircleRows =
+      (sharedCirclesData as unknown as DbSharedCircleRow[]) || [];
+    const fromCircleId = backHref.startsWith("/sharedrobe/")
+      ? backHref.split("/")[2] || null
+      : null;
+
+    const preferredRow =
+      (fromCircleId &&
+        sharedCircleRows.find((r) => r.circle_id === fromCircleId)) ||
+      sharedCircleRows[0];
+
+    if (preferredRow?.circle) {
+      borrowCircle = {
+        id: preferredRow.circle.id,
+        name: preferredRow.circle.name,
+      };
+    }
+
+    if (pendingReqData) {
+      initialPendingBorrowRequest = {
+        id: pendingReqData.id,
+        durationIntent: pendingReqData.duration_intent,
+      };
+    }
   }
 
   interface ProfileRef {
@@ -157,6 +209,8 @@ export default async function ItemDetailPage({
       isOwner={isOwner}
       currentUserId={user.id}
       backHref={backHref}
+      borrowCircle={borrowCircle}
+      initialPendingBorrowRequest={initialPendingBorrowRequest}
     />
   );
 }

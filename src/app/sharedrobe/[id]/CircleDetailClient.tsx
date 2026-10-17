@@ -255,23 +255,6 @@ export default function CircleDetailClient({
   };
 
   const handleGarmentCardClick = (item: CircleGarmentItem) => {
-    const isOwner = item.owner_id === currentUserId;
-    const isAvailable = item.status === "Available";
-    const alreadyRequested = myPendingRequestedItemIds.has(item.id);
-
-    if (!isOwner && isAvailable && !alreadyRequested) {
-      setBorrowModalItem({
-        id: item.id,
-        title: item.title,
-        category: item.category,
-        image_url: item.image_url,
-        owner_id: item.owner_id,
-        ownerName: item.ownerName,
-        status: item.status,
-      });
-      return;
-    }
-
     router.push(`/items/${item.id}?from=/sharedrobe/${circle.id}`);
   };
 

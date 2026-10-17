@@ -15,9 +15,11 @@ import {
   Megaphone,
   Mail,
   Siren,
+  Sparkles,
   X,
 } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
+import BorrowRequestModal from "@/components/BorrowRequestModal";
 import FormMessage from "@/components/ui/FormMessage";
 import { cn } from "@/utils/cn";
 import {
@@ -58,13 +60,18 @@ interface ItemDetailClientProps {
   isOwner: boolean;
   currentUserId: string;
   backHref?: string;
+  borrowCircle?: { id: string; name: string } | null;
+  initialPendingBorrowRequest?: { id: string; durationIntent: string } | null;
 }
 
 export default function ItemDetailClient({
   item,
   friends,
   isOwner,
+  currentUserId,
   backHref = "/",
+  borrowCircle = null,
+  initialPendingBorrowRequest = null,
 }: ItemDetailClientProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -84,6 +91,10 @@ export default function ItemDetailClient({
   // Modals state
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isNudgeModalOpen, setIsNudgeModalOpen] = useState(false);
+  const [isBorrowModalOpen, setIsBorrowModalOpen] = useState(false);
+  const [hasRequestedBorrow, setHasRequestedBorrow] = useState(
+    Boolean(initialPendingBorrowRequest)
+  );
 
   // Feedback banner state
   const [feedback, setFeedback] = useState<{
@@ -498,8 +509,8 @@ export default function ItemDetailClient({
             )}
           </section>
 
-          {/* SECTION 3: PROMINENT DELETE SECTION (Owner only) */}
-          {isOwner && (
+          {/* SECTION 3: PROMINENT DELETE SECTION (Owner) OR BORROW REQUEST BUTTON (Non-Owner) */}
+          {isOwner ? (
             <section className="pt-2">
               <button
                 type="button"
@@ -511,6 +522,48 @@ export default function ItemDetailClient({
                 <span>Delete Garment from Closet</span>
               </button>
             </section>
+          ) : (
+            <section className="pt-2">
+              {hasRequestedBorrow ? (
+                <button
+                  type="button"
+                  disabled
+                  className="w-full flex items-center justify-center gap-2 rounded-2xl border border-dusty-lilac bg-dusty-lilac/15 p-3.5 text-xs font-bold text-french-navy shadow-2xs cursor-default"
+                >
+                  <Clock size={15} className="text-dusty-lilac" />
+                  <span>
+                    Borrow Request Pending
+                    {initialPendingBorrowRequest?.durationIntent
+                      ? ` (${initialPendingBorrowRequest.durationIntent})`
+                      : ""}{" "}
+                    ✨
+                  </span>
+                </button>
+              ) : item.status === "Available" && borrowCircle ? (
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => setIsBorrowModalOpen(true)}
+                  className="w-full flex items-center justify-center gap-2 rounded-2xl bg-french-navy p-3.5 text-xs font-bold uppercase tracking-wider text-white shadow-md transition hover:bg-french-navy-hover active:scale-95 disabled:opacity-50"
+                >
+                  <Sparkles size={15} className="text-dusty-lilac" />
+                  <span>Request to Borrow Item</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  className="w-full flex items-center justify-center gap-2 rounded-2xl border border-border-neutral bg-chalk p-3.5 text-xs font-bold text-muted shadow-2xs cursor-not-allowed"
+                >
+                  <Clock size={15} />
+                  <span>
+                    {item.borrowedBy === currentUserId
+                      ? "You're Currently Borrowing This Piece ✨"
+                      : `Currently ${item.status} — Cannot Borrow Right Now`}
+                  </span>
+                </button>
+              )}
+            </section>
           )}
         </div>
       </div>
@@ -518,6 +571,30 @@ export default function ItemDetailClient({
       {/* Persistent Bottom Nav Docked as Part of the Screen */}
       <BottomNav />
     </main>
+
+      {/* BORROW REQUEST MODAL (Non-owner viewing item from a circle) */}
+      {borrowCircle && (
+        <BorrowRequestModal
+          isOpen={isBorrowModalOpen}
+          onClose={() => setIsBorrowModalOpen(false)}
+          item={{
+            id: item.id,
+            title: item.title,
+            category: item.category,
+            image_url: item.imageUrl,
+            owner_id: item.ownerId,
+            ownerName: item.ownerName,
+            status: item.status,
+          }}
+          circleId={borrowCircle.id}
+          circleName={borrowCircle.name}
+          onSuccess={(message) => {
+            setHasRequestedBorrow(true);
+            showFeedback("success", message);
+            router.refresh();
+          }}
+        />
+      )}
 
       {/* LENDER CONTROLS MODAL: 'Keep it Private (Email)' vs 'Create Drama (Public Call-out)' */}
       {isNudgeModalOpen && (
