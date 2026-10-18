@@ -2,8 +2,8 @@
 
 > **Document Type:** Multi-Agent System Handoff & System State Blueprint  
 > **Repository:** `sheen93/sharedrobe`  
-> **Last Updated:** October 17, 2026 (Local Time: 14:45 EDT)  
-> **Current Active Branch:** `feat/sprint3-circle-engine` (Sprint 3 Complete & Verified)  
+> **Last Updated:** October 18, 2026 (Local Time: 04:15 EDT)  
+> **Current Active Branch:** `main` (Sprint 4 Lookbook Builder & Post-Sprint Refinements Complete & Merged)  
 > **Active Environment:** Next.js 16.3.5 (App Router, Turbopack) / React 19 / TypeScript 5 / Tailwind CSS v4 / Supabase (@supabase/ssr)
 
 ---
@@ -258,6 +258,49 @@ This document serves as an exhaustive, definitive record of every engineering de
   - Expanded `scripts/test-social-actions-edge-cases.mjs` with Section 7 (7 new tests `7A`–`7G`).
   - Total automated tests increased from 40 to 47 passing tests (14 upload + 33 social/items/borrow/drama).
   - 0 ESLint errors, 0 TypeScript errors, Next.js 16 Turbopack build succeeded.
+- **Merged to `main` at commit `956fcff`.**
+
+---
+
+### Milestone 9: Sprint 4 Lookbook Builder, Circle Yay/Nay Polling, Batch Borrow & UX Refinements (`feat/sprint4-lookbook-builder`)
+- **Part 1: Database Architecture & Lookbook RLS (`supabase/migrations/20261019000000_sprint4_lookbooks.sql`):**
+  - Created ENUMs `outfit_visibility` (`'private'`, `'circle_public'`) and `outfit_vote_type` (`'yay'`, `'nay'`), and extended `circle_activity_type` with `'shared_outfit'`.
+  - Created `public.outfits` (`id`, `creator_id`, `circle_id`, `title`, `visibility`, `created_at`), `public.outfit_items` (`outfit_id`, `item_id`, `added_at` with unique pair constraint), and `public.outfit_votes` (`outfit_id`, `voter_id`, `vote`, `created_at` with unique constraint on `(outfit_id, voter_id)`).
+  - Added `target_outfit_id` foreign key on `public.circle_activity`.
+  - Created `SECURITY DEFINER` anti-recursion helpers `public.can_view_outfit(lookup_outfit_id, lookup_user_id)` and `public.is_outfit_creator(lookup_outfit_id, lookup_user_id)`.
+- **Part 2: Server Actions & Turbopack Constants (`src/app/outfits/actions.ts`, `src/app/outfits/constants.ts`):**
+  - Separated synchronous validators, types, and message formatters into `src/app/outfits/constants.ts`.
+  - Implemented async Server Actions in `src/app/outfits/actions.ts`:
+    - `createOutfit(title, itemIds[], circleId?, visibility)`: Validates title & deduplicated item UUIDs, inserts `outfits`, batch-inserts `outfit_items`, and logs a `'shared_outfit'` event into `circle_activity` when `visibility === 'circle_public'`.
+    - `toggleOutfitVisibility(outfitId, visibility, circleId?)`: Toggles `'private'` vs `'circle_public'` and syncs `circle_activity`.
+    - `castOutfitVote(outfitId, vote)`: Upserts `'yay'` or `'nay'` into `outfit_votes` on conflict `(outfit_id, voter_id)`.
+    - `batchBorrowOutfitItems(outfitId, durationIntent)`: Identifies all items in the outfit not owned by `auth.uid()`, filters to `'Available'` items without an existing pending request, inserts `borrow_requests` for each owner using the shared `durationIntent`, and dispatches Resend notification emails to each owner inside non-blocking try/catch boundaries.
+    - `deleteOutfit(outfitId)`: Creator-only outfit deletion.
+- **Part 3: The Lookbook Studio Builder UI (`src/app/outfits/builder/page.tsx`, `OutfitBuilderClient.tsx`, `src/app/MyDrobeClient.tsx`):**
+  - Built SSR `/outfits/builder` route prefetching the user's personal closet items, shared circle items across all approved circles, and saved lookbooks with vote tallies.
+  - Built `OutfitBuilderClient.tsx` featuring an interactive **Outfit Canvas**, tabbed selector (`My Closet` vs `Circle Closets`) with circle & category filters, **Save Lookbook Modal** (`Keep Private` vs `Share to Circle for Yay/Nay`), and **Your Saved Lookbooks** section.
+  - Added Lookbook Studio CTA banner in `MyDrobeClient.tsx` and Circle Detail header (`CircleDetailClient.tsx`).
+- **Part 4: Circle Drama Feed Integration & Outfit Detail Batch Borrow (`src/app/outfits/[id]/page.tsx`, `OutfitDetailClient.tsx`, `src/app/sharedrobe/[id]/CircleDetailClient.tsx`):**
+  - Rendered Dusty Lilac **Lookbook Poll Cards** in the Circle `Activity & Drama` feed with garment collage strips and live **`👍 Yay`** / **`👎 Nay`** voting buttons.
+  - Built `/outfits/[id]` (`OutfitDetailClient.tsx`) displaying the full lookbook breakdown, live Yay/Nay poll bar, per-garment owner/availability badges, and a master **`Request to Borrow Remaining Items`** button that opens the playful duration modal and invokes `batchBorrowOutfitItems`.
+- **Part 5: Post-Sprint 4 UX & Functional Refinements:**
+  1. **Removed Duplicate Circle Card Header Buttons (`src/app/sharedrobe/SharedrobeClient.tsx`):** Removed redundant `"Open Circle"` and `"Add Friends"` buttons from the collapsed circle card header bar so only the single action row inside the expanded drawer is shown.
+  2. **Uniform Member Closet Cards & Dedicated Member Management (`src/app/sharedrobe/[id]/CircleDetailClient.tsx`):**
+     - Standardized all cards in `MEMBER CLOSET DRAWERS` (`All Closets`, `You`, member cards) to a uniform `h-[108px] w-[88px]` layout and removed the inline `"Admin ▾"` button from non-admin member cards.
+     - Added a **`Manage Members`** / **`Members`** button and modal where Circle Admins can invite friends or remove non-admin members (`removeCircleMember`), and non-admin members can leave the circle (`leaveCircle`).
+  3. **Seen-State Dismissal for Public Call-out Alert Banner (`CircleDetailClient.tsx`):**
+     - Tracked `public_nudge` activity signature in state and `localStorage` (`sharedrobe_seen_drama_${circle.id}`) so opening the `Activity & Drama` tab (or clicking `"Spill Tea →"`) dismisses the `"🚨 X Public Call-outs in the Drama Feed!"` banner and pulsing megaphone indicator after checking once.
+  4. **Public Lend/Borrow Drama Resolution (`resolveBorrowDrama` in `src/app/sharedrobe/actions.ts`, `CircleDetailClient.tsx`, `ItemDetailClient.tsx`):**
+     - Added `resolveBorrowDrama` which resets the garment status to `'Available'` (`borrowed_by = null`), marks active `borrow_requests` as `'returned'`, deletes `'public_nudge'` siren call-outs, and logs a `"🕊️ Drama Resolved!"` note in the circle feed.
+     - Added **`🕊️ Resolve Drama & Mark Returned`** buttons on Public Call-out cards in the Drama Feed, `'Lent Out'` garment cards in the Circle Closet Racks, and inside `ItemDetailClient.tsx`.
+  5. **Cancel Pending Borrow Request (`cancelBorrowRequest` in `src/app/sharedrobe/actions.ts`, `ItemDetailClient.tsx`, `CircleDetailClient.tsx`):**
+     - Added `cancelBorrowRequest` allowing a requester to cancel their pending borrow request before the lender approves it, with **`✕ Cancel Request`** buttons on both `/items/[id]` and Circle Closet garment cards.
+  6. **Saved Lookbook Card Side-by-Side Action Bar (`OutfitBuilderClient.tsx`):**
+     - Redesigned the Saved Lookbook card footer into a full-width 2-column action bar (`grid-cols-2 gap-2`) so **`👁 Open Lookbook`** and **`🔒 Make Private`** / **`🌐 Share for Poll`** sit cleanly side-by-side at equal `h-8` height without text wrapping.
+- **QA Verification & Edge Case Matrix:**
+  - Expanded `scripts/test-social-actions-edge-cases.mjs` with Section 8 (7 new lookbook & batch-borrow tests `8A`–`8G`).
+  - Total automated tests increased from 47 to 54 passing tests (14 upload + 40 social/items/borrow/drama/lookbooks).
+  - 0 ESLint errors, 0 TypeScript errors, Next.js 16 Turbopack build succeeded.
 
 ---
 
@@ -269,7 +312,7 @@ sharedrobe/
 ├── docs/
 │   └── AUTH.md                     # Supabase authentication & deployment guide
 ├── scripts/
-│   ├── test-social-actions-edge-cases.mjs # QA Advocate social, items & borrow test suite (33 tests)
+│   ├── test-social-actions-edge-cases.mjs # QA Advocate social, items, borrow & lookbook test suite (40 tests)
 │   ├── test-upload-edge-cases.mjs  # QA Advocate automated edge-case test suite (14 tests)
 │   └── validate-and-pr.sh          # CI pre-PR pipeline (lint -> typecheck -> test -> build -> push)
 ├── src/
@@ -278,28 +321,37 @@ sharedrobe/
 │   │   ├── items/
 │   │   │   ├── [id]/
 │   │   │   │   ├── page.tsx        # SSR item detail prefetching owner, borrower, friends & borrow context
-│   │   │   │   └── ItemDetailClient.tsx # Full-bleed item card, status/tag controls, lender nudge & borrower CTA
+│   │   │   │   └── ItemDetailClient.tsx # Full-bleed item card, status/tag controls, nudge, resolve drama & cancel borrow
 │   │   │   ├── actions.ts          # Server actions: updateItemStatus, updateItemTags, deleteItem
 │   │   │   └── constants.ts        # Item statuses, tag constraints, UUID/storage helpers (Turbopack safe)
 │   │   ├── login/
 │   │   │   ├── actions.ts          # Server actions for signIn and signUp
 │   │   │   └── page.tsx            # Stitch-themed mobile login & registration UI
+│   │   ├── outfits/
+│   │   │   ├── [id]/
+│   │   │   │   ├── page.tsx        # SSR lookbook detail route prefetching pieces, votes & borrow status
+│   │   │   │   └── OutfitDetailClient.tsx # Lookbook detail view, Yay/Nay voting & Master Batch Borrow modal
+│   │   │   ├── builder/
+│   │   │   │   ├── page.tsx        # SSR Lookbook Studio route prefetching My Closet, Circle Closets & saved outfits
+│   │   │   │   └── OutfitBuilderClient.tsx # Interactive Outfit Canvas, tabbed selector, Save modal & Saved Lookbooks
+│   │   │   ├── actions.ts          # Server actions: createOutfit, toggleOutfitVisibility, castOutfitVote, batchBorrowOutfitItems
+│   │   │   └── constants.ts        # Lookbook visibility/vote constants, validators & formatters (Turbopack safe)
 │   │   ├── profile/
 │   │   │   ├── actions.ts          # Server actions for updateProfile, updatePassword, signOut
 │   │   │   ├── page.tsx            # Server Component fetching authenticated user
 │   │   │   └── ProfileClient.tsx   # Interactive profile form with password modal trigger
 │   │   ├── sharedrobe/
 │   │   │   ├── [id]/
-│   │   │   │   ├── page.tsx        # Circle Detail SSR page prefetching members, garments, requests & drama feed
-│   │   │   │   └── CircleDetailClient.tsx # Member drawers, garment racks, standalone borrow CTA & Drama Feed
-│   │   │   ├── actions.ts          # Social & Circle Server actions (friends, circles, borrow, nudge, leave/remove)
+│   │   │   │   ├── page.tsx        # Circle Detail SSR page prefetching members, garments, requests, drama & lookbooks
+│   │   │   │   └── CircleDetailClient.tsx # Uniform member drawers, Manage Members modal, racks, Drama Feed & Lookbook polls
+│   │   │   ├── actions.ts          # Social & Circle Server actions (friends, circles, borrow, cancel, nudge, resolveDrama)
 │   │   │   ├── constants.ts        # Borrow duration options, nudge validators & formatters (Turbopack safe)
 │   │   │   ├── page.tsx            # Community Hub SSR Server Component prefetching circles, members & friends
 │   │   │   └── SharedrobeClient.tsx # 3-tab UI: My Circles (round member avatars, admin/leave controls), Friends, Search
 │   │   ├── globals.css             # Tailwind v4 @theme design tokens (Parisian Navy & Dusty Lilac)
 │   │   ├── layout.tsx              # Root HTML shell with typography & viewport settings
 │   │   ├── page.tsx                # Server Component: authenticates & prefetches MyDrobe items via SSR
-│   │   └── MyDrobeClient.tsx       # Hydrated client view: in-memory category filter, item detail links, status pills
+│   │   └── MyDrobeClient.tsx       # Hydrated client view: Lookbook Studio CTA, category filter, item links, status pills
 │   ├── components/
 │   │   ├── ui/
 │   │   │   ├── FieldCard.tsx       # Stitch-styled chalk form card with labels & captions
@@ -335,7 +387,8 @@ sharedrobe/
 │       ├── 20261012000001_rls_insert_policy.sql       # Strict RLS (auth.uid() = owner_id) & Storage policies
 │       ├── 20261016000000_phase2_social.sql           # Phase 2 Social Engine: profiles, circles, friends, RLS
 │       ├── 20261017000000_sprint2_item_management.sql # Sprint 2: item_status ENUM, borrowed_by, tags constraint
-│       └── 20261018000000_sprint3_circles.sql         # Sprint 3: borrow_requests, circle_activity, RLS policies
+│       ├── 20261018000000_sprint3_circles.sql         # Sprint 3: borrow_requests, circle_activity, RLS policies
+│       └── 20261019000000_sprint4_lookbooks.sql       # Sprint 4: outfits, outfit_items, outfit_votes, Lookbook RLS
 ├── next.config.ts                  # Allowed dev origins (192.168.1.153, 192.168.*.*, etc.) for mobile LAN dev
 ├── package.json                    # Scripts & dependencies
 └── tsconfig.json                   # Strict TypeScript compiler options
@@ -466,19 +519,54 @@ create table public.circle_activity (
   id uuid primary key default gen_random_uuid(),
   circle_id uuid not null references public.circles(id) on delete cascade,
   actor_id uuid not null references public.profiles(id) on delete cascade,
-  action_type public.circle_activity_type not null, -- 'shared_item','borrowed_item','public_nudge'
+  action_type public.circle_activity_type not null, -- 'shared_item','borrowed_item','public_nudge','shared_outfit'
   target_item_id uuid references public.items(id) on delete set null,
+  target_outfit_id uuid references public.outfits(id) on delete cascade,
   message text,
   created_at timestamptz default timezone('utc'::text, now()) not null
 );
 ```
 
+### 5.6 Sprint 4 Lookbooks Schema (`20261019000000_sprint4_lookbooks.sql`)
+```sql
+-- outfits
+create table public.outfits (
+  id uuid primary key default gen_random_uuid(),
+  creator_id uuid not null references public.profiles(id) on delete cascade,
+  circle_id uuid references public.circles(id) on delete set null,
+  title text not null check (char_length(trim(title)) between 2 and 80),
+  visibility public.outfit_visibility not null default 'private', -- 'private','circle_public'
+  created_at timestamptz default timezone('utc'::text, now()) not null
+);
+
+-- outfit_items
+create table public.outfit_items (
+  id uuid primary key default gen_random_uuid(),
+  outfit_id uuid not null references public.outfits(id) on delete cascade,
+  item_id uuid not null references public.items(id) on delete cascade,
+  added_at timestamptz default timezone('utc'::text, now()) not null,
+  unique (outfit_id, item_id)
+);
+
+-- outfit_votes
+create table public.outfit_votes (
+  id uuid primary key default gen_random_uuid(),
+  outfit_id uuid not null references public.outfits(id) on delete cascade,
+  voter_id uuid not null references public.profiles(id) on delete cascade,
+  vote public.outfit_vote_type not null, -- 'yay','nay'
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  unique (outfit_id, voter_id)
+);
+```
+
 #### Anti-Recursion Security Definer Functions:
-In Postgres/Supabase, querying `circle_members` or `items` within nested policies creates infinite recursion (`42P17`). This is resolved using `SECURITY DEFINER` functions with fixed search paths:
+In Postgres/Supabase, querying `circle_members`, `items`, or `outfits` within nested policies creates infinite recursion (`42P17`). This is resolved using `SECURITY DEFINER` functions with fixed search paths:
 - `public.is_circle_admin(check_circle_id uuid, check_user_id uuid) returns boolean`
 - `public.is_circle_member(check_circle_id uuid, check_user_id uuid) returns boolean`
 - `public.is_item_shared_with_user(check_item_id uuid, check_user_id uuid) returns boolean`
 - `public.is_item_owner(lookup_item_id uuid, lookup_user_id uuid) returns boolean`
+- `public.can_view_outfit(lookup_outfit_id uuid, lookup_user_id uuid) returns boolean`
+- `public.is_outfit_creator(lookup_outfit_id uuid, lookup_user_id uuid) returns boolean`
 
 ---
 
@@ -488,7 +576,7 @@ Run all checks locally with:
 ```bash
 npm run lint         # ESLint 9 (0 errors, 0 warnings)
 npm run typecheck    # TypeScript 5 (No type errors)
-npm test             # QA Advocate unified test suites (47 passing tests)
+npm test             # QA Advocate unified test suites (54 passing tests)
 npm run build        # Next.js 16 Turbopack build (All routes compiled)
 ```
 
@@ -547,15 +635,22 @@ npm run build        # Next.js 16 Turbopack build (All routes compiled)
   ✅ [PASS] 6E: Item borrower reference is strictly cleared to null when status is not 'Lent Out'
   ✅ [PASS] 6F: Tag validation strictly validates against the 7 allowed tag categories
   ✅ [PASS] 6G: Storage deletion path validation prevents cross-user file deletion attacks
-  ✅ [PASS] 7A: Borrow duration validation accepts exact 4 playful options and rejects arbitrary strings
-  ✅ [PASS] 7B: Nudge type validation strictly accepts only 'private' and 'public'
-  ✅ [PASS] 7C: Public nudge message formatter produces playful call-out with borrower name and item title
-  ✅ [PASS] 7D: Self-borrowing check blocks owners from requesting their own items
-  ✅ [PASS] 7E: Admin self-removal guard blocks circle admins from removing themselves
-  ✅ [PASS] 7F: Return nudge email safely escapes HTML in borrower, owner, and garment titles
-  ✅ [PASS] 7G: Borrow request email safely escapes HTML in requester, circle, garment, and duration strings
+  ✅ [PASS] 7A: Borrow duration validation strictly enforces the 4 playful duration options
+  ✅ [PASS] 7B: Borrow request validation blocks self-borrowing and non-Available items
+  ✅ [PASS] 7C: approveBorrowRequest strictly enforces owner authorization and transitions item to 'Lent Out'
+  ✅ [PASS] 7D: nudgeReturn strictly verifies owner identity, 'Lent Out' status, and valid nudge mode
+  ✅ [PASS] 7E: Public nudge generator formats playful Drama Feed call-out copy accurately
+  ✅ [PASS] 7F: removeCircleMember enforces Circle Admin role and blocks admin self-removal
+  ✅ [PASS] 7G: Circle activity types strictly match Postgres circle_activity_type ENUM
+  ✅ [PASS] 8A: Outfit title validation enforces 2-80 character bounds
+  ✅ [PASS] 8B: Outfit visibility strictly validates 'private' and 'circle_public' ENUM values
+  ✅ [PASS] 8C: castOutfitVote strictly validates 'yay' and 'nay' ENUM values
+  ✅ [PASS] 8D: deduplicateItemIds strips duplicate and malformed garment IDs
+  ✅ [PASS] 8E: batchBorrowOutfitItems accurately identifies only garments not owned by auth.uid()
+  ✅ [PASS] 8F: batchBorrowOutfitItems filters out already-pending and non-Available items
+  ✅ [PASS] 8G: Shared outfit activity formatter generates playful Lookbook Drama Feed copy
 ==================================================
-🎉 All 33 Social Engine, Circle Friends, Items, Storage & Sprint 3 Drama tests PASSED!
+🎉 All 40 Social Engine, Circle Friends, Items, Borrow, Drama Feed & Lookbook tests PASSED!
 ```
 
 ---
@@ -576,9 +671,10 @@ For any developer or agent running this repository on a fresh Supabase project:
    - Run `supabase/migrations/20261016000000_phase2_social.sql`
    - Run `supabase/migrations/20261017000000_sprint2_item_management.sql`
    - Run `supabase/migrations/20261018000000_sprint3_circles.sql`
+   - Run `supabase/migrations/20261019000000_sprint4_lookbooks.sql`
    - Confirm that the `item_category` enum contains: `Tops`, `Bottoms`, `Dresses`, `Outerwear`, `Shoes`, `Bags`, `Accessories`.
    - Confirm that the `item_status` enum contains: `Available`, `Lent Out`, `In Laundry`.
-   - Confirm that `borrow_request_status` and `circle_activity_type` enums and `borrow_requests` / `circle_activity` tables exist.
+   - Confirm that `borrow_request_status`, `circle_activity_type`, `outfit_visibility`, and `outfit_vote_type` enums and `borrow_requests` / `circle_activity` / `outfits` / `outfit_items` / `outfit_votes` tables exist.
 3. **Storage Bucket Configuration:**
    - In Supabase Dashboard -> **Storage** -> **Buckets**, confirm bucket `wardrobe` is created and toggled to **Public**.
 4. **Authentication Settings:**
@@ -593,7 +689,7 @@ For any developer or agent running this repository on a fresh Supabase project:
 
 ## 8. Roadmap & Next Steps for Future Multi-Agent Iterations
 
-The following tasks are prioritized for the next development sprints:
+The following tasks have been completed across Sprints 1–4:
 
 ### Sprint 1: ShareDrobe Circles Engine (Phase 2 MVP) — [COMPLETED]
 - Delivered in Phase 2 (`feat/phase2-friends-and-circles`) and Milestone 6 (`feat/add-friends-to-circle`).
@@ -602,17 +698,16 @@ The following tasks are prioritized for the next development sprints:
 - Delivered in Sprint 2 (`feat/sprint2-item-management`).
 
 ### Sprint 3: Circle Engine — Borrow Requests, Member Drawers & The Drama Feed — [COMPLETED]
-- **Delivered in Sprint 3 (`feat/sprint3-circle-engine`):**
-  - `borrow_requests` and `circle_activity` tables with anti-recursion RLS policies.
-  - Server actions for borrowing (`createBorrowRequest`, `approveBorrowRequest`, `rejectBorrowRequest`), returning/nudging (`nudgeReturn` private email + public drama call-out), and membership (`removeCircleMember`, `leaveCircle`).
-  - Dedicated Circle Closet Detail route (`/sharedrobe/[id]`) with horizontal member avatar drawers, standalone `"Borrow This Item"` button on available cards, and chronological `"Activity & Drama"` feed.
-  - Item Detail page (`/items/[id]`) integration with context-aware Back navigation (`?from=...`), Lender Controls (`"Ask for it back"` modal), and non-owner `"Request to Borrow Item"` bottom action button.
-  - Compact round member avatars with Admin Add/Remove and Member Leave controls on `/sharedrobe`.
-  - 47 automated QA edge-case tests passing.
+- Delivered in Sprint 3 (`feat/sprint3-circle-engine`).
 
-### Sprint 4: Lookbook Builder ("Fav Outfit")
-- **Fav Outfit Feature:**
-  - Multi-item pairing engine linking a `Top` and `Bottom` (or `Dress` + `Accessories`) into a curated lookbook card matching the Dusty Lilac folder styling in the Stitch mockups.
+### Sprint 4: Lookbook Builder ("Fav Outfit"), Circle Polling & Batch Borrow — [COMPLETED]
+- **Delivered in Sprint 4 (`feat/sprint4-lookbook-builder`):**
+  - `outfits`, `outfit_items`, and `outfit_votes` tables with anti-recursion RLS policies.
+  - Lookbook Studio Builder (`/outfits/builder`) combining pieces from `My Closet` and `Circle Closets` with `Keep Private` vs `Share to Circle for Yay/Nay` toggle and side-by-side Saved Lookbook controls.
+  - Dusty Lilac Lookbook Poll Cards in the Circle Drama Feed with live `👍 Yay` / `👎 Nay` voting.
+  - Lookbook Detail route (`/outfits/[id]`) with master `"Request to Borrow Remaining Items"` batch borrow engine (`batchBorrowOutfitItems`).
+  - Post-sprint UX enhancements: uniform member closet cards, dedicated Manage Circle Members modal, one-time seen tracking for Drama Feed call-out banners, `resolveBorrowDrama` return resolution flow, and `cancelBorrowRequest` pre-approval cancellation.
+  - 54 automated QA edge-case tests passing.
 
 ---
 
@@ -812,7 +907,7 @@ Before writing any new code, execute the full validation suite to verify that th
 ```bash
 npm run lint         # Must report 0 errors, 0 warnings
 npm run typecheck    # Must report 0 TypeScript errors
-npm test             # Must report 47/47 passing tests
+npm test             # Must report 54/54 passing tests
 npm run build        # Must compile all routes successfully with Turbopack
 ```
 

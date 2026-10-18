@@ -2087,3 +2087,296 @@ export async function leaveCircle(
     data: { circleId },
   };
 }
+
+/**
+ * Resolves public lend/borrow drama:
+ * - Marks the lent garment back to 'Available' and clears borrowed_by (when called by item owner)
+ * - Transitions active borrow_requests for the garment to 'returned'
+ * - Clears 'public_nudge' call-out siren cards for the garment from circle_activity
+ * - Logs a peaceful resolution message in the circle feed
+ */
+export async function resolveBorrowDrama(params: {
+  itemId?: string | null;
+  activityId?: string | null;
+  circleId?: string | null;
+}): Promise<ActionResult<{ itemId?: string | null }>> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      success: false,
+      error: "Authentication required to resolve borrow drama.",
+    };
+  }
+
+  let resolvedItemId =
+    params.itemId && isValidUuid(params.itemId) ? params.itemId.trim() : null;
+  let resolvedCircleId =
+    params.circleId && isValidUuid(params.circleId)
+      ? params.circleId.trim()
+      : null;
+  const resolvedActivityId =
+    params.activityId && isValidUuid(params.activityId)
+      ? params.activityId.trim()
+      : null;
+
+  if (!resolvedItemId && !resolvedActivityId) {
+    return {
+      success: false,
+      error: "Please specify an item or call-out card to resolve.",
+    };
+  }
+
+  // If activityId was passed, inspect the circle_activity row
+  if (resolvedActivityId) {
+    const { data: actRow } = await supabase
+      .from("circle_activity")
+      .select("id, circle_id, actor_id, action_type, target_item_id")
+      .eq("id", resolvedActivityId)
+      .maybeSingle();
+
+    if (actRow) {
+      if (!resolvedItemId && actRow.target_item_id) {
+        resolvedItemId = actRow.target_item_id;
+      }
+      if (!resolvedCircleId && actRow.circle_id) {
+        resolvedCircleId = actRow.circle_id;
+      }
+    }
+  }
+
+  let itemTitle = "Borrowed Piece";
+  let itemOwnerId: string | null = null;
+
+  if (resolvedItemId) {
+    const { data: itemRow } = await supabase
+      .from("items")
+      .select("id, title, owner_id, status, borrowed_by")
+      .eq("id", resolvedItemId)
+      .maybeSingle();
+
+    if (itemRow) {
+      itemTitle = itemRow.title || "Borrowed Piece";
+      itemOwnerId = itemRow.owner_id;
+
+      const isOwner = itemRow.owner_id === user.id;
+      const isBorrower = itemRow.borrowed_by === user.id;
+
+      // Also check if user is circle admin when resolving a call-out in a circle
+      let isCircleAdmin = false;
+      if (resolvedCircleId) {
+        const { data: adminCheck } = await supabase
+          .from("circle_members")
+          .select("role, status")
+          .eq("circle_id", resolvedCircleId)
+          .eq("user_id", user.id)
+          .eq("role", "admin")
+          .eq("status", "approved")
+          .maybeSingle();
+        isCircleAdmin = Boolean(adminCheck);
+      }
+
+      if (!isOwner && !isBorrower && !isCircleAdmin) {
+        return {
+          success: false,
+          error:
+            "Only the garment owner, the borrower, or a Circle Admin can resolve this borrow drama.",
+        };
+      }
+
+      // 1. If the owner is resolving (or item is owned by user), reset item to 'Available'
+      if (isOwner) {
+        const { error: itemUpdateErr } = await supabase
+          .from("items")
+          .update({
+            status: "Available",
+            borrowed_by: null,
+          })
+          .eq("id", resolvedItemId)
+          .eq("owner_id", user.id);
+
+        if (itemUpdateErr) {
+          console.error(
+            "[resolveBorrowDrama] Error resetting item status:",
+            itemUpdateErr
+          );
+        }
+      }
+
+      // 2. Mark any active ('approved' or 'pending') borrow_requests for this item as 'returned'
+      await supabase
+        .from("borrow_requests")
+        .update({
+          status: "returned",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("item_id", resolvedItemId)
+        .in("status", ["approved", "pending"]);
+
+      // 3. Remove active 'public_nudge' call-out rows for this item
+      await supabase
+        .from("circle_activity")
+        .delete()
+        .eq("target_item_id", resolvedItemId)
+        .eq("action_type", "public_nudge");
+    }
+  }
+
+  // Also delete the specific activityId if it was a public_nudge
+  if (resolvedActivityId) {
+    await supabase
+      .from("circle_activity")
+      .delete()
+      .eq("id", resolvedActivityId)
+      .eq("action_type", "public_nudge");
+  }
+
+  // 4. Log a peaceful resolution note into the circle feed so members see the happy ending
+  if (resolvedCircleId) {
+    const { data: actorProfile } = await supabase
+      .from("profiles")
+      .select("full_name, email")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const actorName =
+      actorProfile?.full_name ||
+      actorProfile?.email?.split("@")[0] ||
+      "Circle Member";
+
+    const isOwnerResolving = itemOwnerId === user.id;
+    const resolutionMessage = isOwnerResolving
+      ? `🕊️ Drama Resolved! ${actorName} confirmed "${itemTitle}" is back home & Available again ✨`
+      : `🕊️ Drama Squashed! ${actorName} returned "${itemTitle}" — peace is restored in the closet ✨`;
+
+    await supabase.from("circle_activity").insert({
+      circle_id: resolvedCircleId,
+      actor_id: user.id,
+      action_type: "shared_item",
+      target_item_id: resolvedItemId,
+      message: resolutionMessage,
+    });
+  }
+
+  revalidatePath("/");
+  revalidatePath("/sharedrobe");
+  if (resolvedCircleId) {
+    revalidatePath(`/sharedrobe/${resolvedCircleId}`);
+  }
+  if (resolvedItemId) {
+    revalidatePath(`/items/${resolvedItemId}`);
+  }
+
+  return {
+    success: true,
+    message: `🕊️ Drama resolved! "${itemTitle}" is marked returned and the call-out has been cleared.`,
+    data: { itemId: resolvedItemId },
+  };
+}
+
+/**
+ * Allows a borrower to cancel their own pending borrow request before the lender approves it.
+ */
+export async function cancelBorrowRequest(params: {
+  requestId?: string | null;
+  itemId?: string | null;
+  circleId?: string | null;
+}): Promise<ActionResult<{ itemId?: string | null }>> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      success: false,
+      error: "Authentication required to cancel a borrow request.",
+    };
+  }
+
+  const validRequestId =
+    params.requestId && isValidUuid(params.requestId)
+      ? params.requestId.trim()
+      : null;
+  const validItemId =
+    params.itemId && isValidUuid(params.itemId) ? params.itemId.trim() : null;
+  const validCircleId =
+    params.circleId && isValidUuid(params.circleId)
+      ? params.circleId.trim()
+      : null;
+
+  if (!validRequestId && !validItemId) {
+    return {
+      success: false,
+      error: "Invalid borrow request or garment ID.",
+    };
+  }
+
+  let lookupQuery = supabase
+    .from("borrow_requests")
+    .select("id, item_id, circle_id, status")
+    .eq("requester_id", user.id)
+    .eq("status", "pending");
+
+  if (validRequestId) {
+    lookupQuery = lookupQuery.eq("id", validRequestId);
+  } else if (validItemId) {
+    lookupQuery = lookupQuery.eq("item_id", validItemId);
+  }
+
+  const { data: pendingRows, error: lookupError } = await lookupQuery;
+
+  if (lookupError) {
+    console.error("[cancelBorrowRequest] Lookup error:", lookupError);
+    return {
+      success: false,
+      error: "Failed to locate your pending borrow request.",
+    };
+  }
+
+  if (!pendingRows || pendingRows.length === 0) {
+    return {
+      success: false,
+      error:
+        "No pending borrow request found — the owner may have already responded.",
+    };
+  }
+
+  const targetIds = pendingRows.map((r) => r.id);
+  const resolvedItemId = validItemId ?? pendingRows[0]?.item_id ?? null;
+  const resolvedCircleId = validCircleId ?? pendingRows[0]?.circle_id ?? null;
+
+  const { error: deleteError } = await supabase
+    .from("borrow_requests")
+    .delete()
+    .in("id", targetIds)
+    .eq("requester_id", user.id)
+    .eq("status", "pending");
+
+  if (deleteError) {
+    console.error("[cancelBorrowRequest] Delete error:", deleteError);
+    return {
+      success: false,
+      error: "Could not cancel borrow request. Please try again.",
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/sharedrobe");
+  if (resolvedCircleId) {
+    revalidatePath(`/sharedrobe/${resolvedCircleId}`);
+  }
+  if (resolvedItemId) {
+    revalidatePath(`/items/${resolvedItemId}`);
+  }
+
+  return {
+    success: true,
+    message: "Borrow request cancelled. You can request this piece again anytime!",
+    data: { itemId: resolvedItemId },
+  };
+}
+

@@ -707,104 +707,132 @@ export default function OutfitBuilderClient({
                 </div>
               </div>
 
-              <div className="mt-3 space-y-2.5">
+              <div className="mt-3 space-y-3">
                 {savedOutfits.map((outfit) => {
                   const isPublic = outfit.visibility === "circle_public";
                   return (
                     <div
                       key={outfit.id}
-                      className="rounded-2xl border border-dusty-lilac/40 bg-chalk p-3 shadow-xs"
+                      className="rounded-2xl border border-dusty-lilac/40 bg-chalk p-3.5 shadow-xs transition hover:border-dusty-lilac"
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span
-                              className={cn(
-                                "inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-[9px] font-bold uppercase",
-                                isPublic
-                                  ? "bg-dusty-lilac text-white"
-                                  : "bg-french-navy/10 text-french-navy"
-                              )}
-                            >
-                              {isPublic ? (
-                                <>
-                                  <Globe className="h-2.5 w-2.5" />
+                      {/* Top Status Row + Compact Delete Action */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-[9px] font-bold uppercase",
+                              isPublic
+                                ? "bg-dusty-lilac text-white"
+                                : "bg-french-navy/10 text-french-navy"
+                            )}
+                          >
+                            {isPublic ? (
+                              <>
+                                <Globe className="h-2.5 w-2.5 shrink-0" />
+                                <span className="truncate">
                                   {outfit.circleName
                                     ? `Shared in ${outfit.circleName}`
                                     : "Circle Public"}
-                                </>
-                              ) : (
-                                <>
-                                  <Lock className="h-2.5 w-2.5" />
-                                  Private Look
-                                </>
-                              )}
-                            </span>
-                            {isPublic && (
-                              <span className="inline-flex items-center gap-2 rounded-md bg-buttercream px-2 py-0.5 font-mono text-[10px] font-bold text-midnight-slate">
-                                <span className="inline-flex items-center gap-0.5 text-emerald-700">
-                                  <ThumbsUp className="h-2.5 w-2.5" />{" "}
-                                  {outfit.yayCount}
                                 </span>
-                                <span className="inline-flex items-center gap-0.5 text-rose-700">
-                                  <ThumbsDown className="h-2.5 w-2.5" />{" "}
-                                  {outfit.nayCount}
-                                </span>
-                              </span>
+                              </>
+                            ) : (
+                              <>
+                                <Lock className="h-2.5 w-2.5 shrink-0" />
+                                <span>Private Look</span>
+                              </>
                             )}
-                          </div>
-                          <h3 className="mt-1 text-sm font-bold text-midnight-slate">
-                            {outfit.title}
-                          </h3>
+                          </span>
+
+                          {isPublic && (
+                            <span className="inline-flex items-center gap-2 rounded-md bg-buttercream px-2 py-0.5 font-mono text-[10px] font-bold text-midnight-slate">
+                              <span className="inline-flex items-center gap-0.5 text-emerald-700">
+                                <ThumbsUp className="h-2.5 w-2.5" />{" "}
+                                {outfit.yayCount}
+                              </span>
+                              <span className="inline-flex items-center gap-0.5 text-rose-700">
+                                <ThumbsDown className="h-2.5 w-2.5" />{" "}
+                                {outfit.nayCount}
+                              </span>
+                            </span>
+                          )}
                         </div>
 
-                        <div className="flex items-center gap-1">
-                          <Link
-                            href={`/outfits/${outfit.id}?from=/outfits/builder`}
-                            className="inline-flex items-center gap-1 rounded-lg border border-border-neutral bg-buttercream px-2.5 py-1 text-[10px] font-bold text-french-navy hover:border-french-navy"
-                          >
-                            <Eye className="h-3 w-3" />
-                            Open
-                          </Link>
-                          <button
-                            type="button"
-                            disabled={isPending}
-                            onClick={() => handleToggleSavedVisibility(outfit)}
-                            className="rounded-lg border border-border-neutral bg-buttercream px-2 py-1 text-[10px] font-bold text-midnight-slate hover:border-dusty-lilac"
-                            title="Toggle Private / Circle Public"
-                          >
-                            {isPublic ? "Make Private" : "Share for Yay/Nay"}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isPending}
-                            onClick={() =>
-                              handleDeleteOutfit(outfit.id, outfit.title)
-                            }
-                            className="rounded-lg p-1 text-muted hover:bg-rose-50 hover:text-rose-600"
-                            title="Delete lookbook"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={() =>
+                            handleDeleteOutfit(outfit.id, outfit.title)
+                          }
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border-neutral bg-buttercream text-muted transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                          title="Delete lookbook"
+                          aria-label={`Delete ${outfit.title}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
 
-                      {/* Collage strip of items in the lookbook */}
-                      <div className="mt-2.5 flex gap-2 overflow-x-auto pb-1">
-                        {outfit.items.map((piece) => (
-                          <div
-                            key={piece.id}
-                            className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-border-neutral bg-buttercream"
-                          >
-                            <Image
-                              src={piece.image_url}
-                              alt={piece.title}
-                              fill
-                              unoptimized
-                              className="object-cover"
-                            />
-                          </div>
-                        ))}
+                      {/* Clickable Title & Garment Collage Strip */}
+                      <Link
+                        href={`/outfits/${outfit.id}?from=/outfits/builder`}
+                        className="mt-2 block group"
+                      >
+                        <div className="flex items-baseline justify-between gap-2">
+                          <h3 className="truncate text-sm font-extrabold text-midnight-slate group-hover:text-french-navy">
+                            {outfit.title}
+                          </h3>
+                          <span className="shrink-0 font-mono text-[10px] text-muted">
+                            {outfit.items.length}{" "}
+                            {outfit.items.length === 1 ? "piece" : "pieces"}
+                          </span>
+                        </div>
+
+                        <div className="mt-2.5 flex gap-2 overflow-x-auto pb-1">
+                          {outfit.items.map((piece) => (
+                            <div
+                              key={piece.id}
+                              className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-border-neutral bg-buttercream transition group-hover:border-french-navy/40"
+                            >
+                              <Image
+                                src={piece.image_url}
+                                alt={piece.title}
+                                fill
+                                unoptimized
+                                className="object-cover"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </Link>
+
+                      {/* Side-by-Side Equal-Height Action Toolbar */}
+                      <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border-neutral/70 pt-2.5">
+                        <Link
+                          href={`/outfits/${outfit.id}?from=/outfits/builder`}
+                          className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-xl bg-french-navy px-3 text-[11px] font-bold whitespace-nowrap text-white shadow-2xs transition hover:bg-french-navy-hover active:scale-95"
+                        >
+                          <Eye className="h-3.5 w-3.5 text-dusty-lilac" />
+                          <span>Open Lookbook</span>
+                        </Link>
+
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={() => handleToggleSavedVisibility(outfit)}
+                          className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border border-border-strong bg-buttercream px-3 text-[11px] font-bold whitespace-nowrap text-midnight-slate transition hover:border-dusty-lilac hover:bg-dusty-lilac/10 active:scale-95 disabled:opacity-50"
+                          title="Toggle Private / Circle Public"
+                        >
+                          {isPublic ? (
+                            <>
+                              <Lock className="h-3 w-3 text-french-navy" />
+                              <span>Make Private</span>
+                            </>
+                          ) : (
+                            <>
+                              <Globe className="h-3 w-3 text-dusty-lilac" />
+                              <span>Share for Poll</span>
+                            </>
+                          )}
+                        </button>
                       </div>
                     </div>
                   );

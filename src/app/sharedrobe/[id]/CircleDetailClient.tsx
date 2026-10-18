@@ -12,7 +12,6 @@ import {
   Check,
   X,
   Clock,
-  ChevronDown,
   UserMinus,
   Loader2,
   AlertCircle,
@@ -25,6 +24,8 @@ import {
   ThumbsUp,
   ThumbsDown,
   Layers,
+  LogOut,
+  Settings2,
 } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import AddFriendsToCircleModal from "@/components/AddFriendsToCircleModal";
@@ -35,6 +36,9 @@ import {
   approveBorrowRequest,
   rejectBorrowRequest,
   removeCircleMember,
+  leaveCircle,
+  resolveBorrowDrama,
+  cancelBorrowRequest,
 } from "@/app/sharedrobe/actions";
 import { castOutfitVote } from "@/app/outfits/actions";
 import type { OutfitVoteType } from "@/app/outfits/constants";
@@ -155,20 +159,58 @@ export default function CircleDetailClient({
   // Member Drawer filter state (null = All Closets, string = specific member's userId)
   const [selectedOwnerId, setSelectedOwnerId] = useState<string | null>(null);
 
-  // Admin dropdown state on member avatars (tracks userId of open dropdown)
-  const [openAdminMenuUserId, setOpenAdminMenuUserId] = useState<string | null>(
-    null
-  );
-
   // Modals state
   const [borrowModalItem, setBorrowModalItem] =
     useState<BorrowModalItem | null>(null);
   const [isAddFriendsOpen, setIsAddFriendsOpen] = useState(false);
+  const [isManageMembersOpen, setIsManageMembersOpen] = useState(false);
 
   // Optimistic tracking for newly submitted borrow requests in this session
   const [localRequestedItemIds, setLocalRequestedItemIds] = useState<string[]>(
     []
   );
+
+  // Track seen public_nudge drama signature so the alert banner disappears after checking once
+  const publicNudgeActivities = activities.filter(
+    (act) => act.action_type === "public_nudge"
+  );
+  const publicNudgeCount = publicNudgeActivities.length;
+  const publicNudgeSignature = publicNudgeActivities
+    .map((act) => act.id)
+    .sort()
+    .join(",");
+  const dramaStorageKey = `sharedrobe_seen_drama_${circle.id}`;
+
+  const [seenDramaSignature, setSeenDramaSignature] = useState<string | null>(
+    () => {
+      if (typeof window === "undefined") return null;
+      try {
+        return window.localStorage.getItem(dramaStorageKey);
+      } catch {
+        return null;
+      }
+    }
+  );
+
+  const markDramaFeedSeen = () => {
+    if (!publicNudgeSignature) return;
+    setSeenDramaSignature(publicNudgeSignature);
+    try {
+      window.localStorage.setItem(dramaStorageKey, publicNudgeSignature);
+    } catch {
+      // Ignore storage errors
+    }
+  };
+
+  const handleSwitchViewTab = (tab: "closet" | "activity") => {
+    if (tab === "activity") {
+      markDramaFeedSeen();
+    }
+    setActiveViewTab(tab);
+  };
+
+  const hasUnseenPublicNudge =
+    publicNudgeCount > 0 && seenDramaSignature !== publicNudgeSignature;
 
   // Feedback banner
   const [feedback, setFeedback] = useState<{
@@ -216,18 +258,11 @@ export default function CircleDetailClient({
     return acc;
   }, {});
 
-  // Count public_nudge drama events
-  const publicNudgeCount = activities.filter(
-    (act) => act.action_type === "public_nudge"
-  ).length;
-
   const handleSelectMemberAvatar = (userId: string) => {
-    setOpenAdminMenuUserId(null);
     setSelectedOwnerId((prev) => (prev === userId ? null : userId));
   };
 
   const handleRemoveMember = (member: CircleMemberProfile) => {
-    setOpenAdminMenuUserId(null);
     setActiveActionId(member.userId);
 
     startTransition(async () => {
@@ -242,6 +277,43 @@ export default function CircleDetailClient({
           "success",
           `${member.fullName} has been removed from ${circle.name}.`
         );
+        router.refresh();
+      } else {
+        showFeedback("error", res.error);
+      }
+    });
+  };
+
+  const handleLeaveCircle = () => {
+    setActiveActionId("leave-circle");
+    startTransition(async () => {
+      const res = await leaveCircle(circle.id);
+      setActiveActionId(null);
+      if (res.success) {
+        setIsManageMembersOpen(false);
+        router.push("/sharedrobe");
+        router.refresh();
+      } else {
+        showFeedback("error", res.error);
+      }
+    });
+  };
+
+  const handleResolveDrama = (params: {
+    itemId?: string | null;
+    activityId?: string | null;
+    actionKey: string;
+  }) => {
+    setActiveActionId(params.actionKey);
+    startTransition(async () => {
+      const res = await resolveBorrowDrama({
+        itemId: params.itemId,
+        activityId: params.activityId,
+        circleId: circle.id,
+      });
+      setActiveActionId(null);
+      if (res.success) {
+        showFeedback("success", res.message);
         router.refresh();
       } else {
         showFeedback("error", res.error);
@@ -270,6 +342,27 @@ export default function CircleDetailClient({
       setActiveActionId(null);
       if (res.success) {
         showFeedback("success", "Borrow request declined.");
+        router.refresh();
+      } else {
+        showFeedback("error", res.error);
+      }
+    });
+  };
+
+  const handleCancelBorrow = (itemId: string) => {
+    const actionKey = `cancel-borrow-${itemId}`;
+    setActiveActionId(actionKey);
+    startTransition(async () => {
+      const res = await cancelBorrowRequest({
+        itemId,
+        circleId: circle.id,
+      });
+      setActiveActionId(null);
+      if (res.success) {
+        setLocalRequestedItemIds((prev) =>
+          prev.filter((id) => id !== itemId)
+        );
+        showFeedback("success", res.message);
         router.refresh();
       } else {
         showFeedback("error", res.error);
@@ -392,7 +485,7 @@ export default function CircleDetailClient({
           <div className="mt-3.5 flex rounded-xl border border-border-neutral bg-chalk p-1">
             <button
               type="button"
-              onClick={() => setActiveViewTab("closet")}
+              onClick={() => handleSwitchViewTab("closet")}
               className={cn(
                 "flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-bold tracking-tight transition",
                 activeViewTab === "closet"
@@ -416,7 +509,7 @@ export default function CircleDetailClient({
 
             <button
               type="button"
-              onClick={() => setActiveViewTab("activity")}
+              onClick={() => handleSwitchViewTab("activity")}
               className={cn(
                 "flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-bold tracking-tight transition",
                 activeViewTab === "activity"
@@ -424,7 +517,7 @@ export default function CircleDetailClient({
                   : "text-muted hover:text-french-navy"
               )}
             >
-              {publicNudgeCount > 0 ? (
+              {hasUnseenPublicNudge ? (
                 <Megaphone
                   className={cn(
                     "h-3.5 w-3.5",
@@ -440,7 +533,7 @@ export default function CircleDetailClient({
               <span
                 className={cn(
                   "rounded px-1.5 py-0.2 font-mono text-[9px] font-bold",
-                  publicNudgeCount > 0
+                  hasUnseenPublicNudge
                     ? "bg-dusty-lilac text-white"
                     : activeViewTab === "activity"
                     ? "bg-white/20 text-white"
@@ -455,11 +548,11 @@ export default function CircleDetailClient({
           {/* VIEW 1: CLOSET RACKS & MEMBER DRAWERS */}
           {activeViewTab === "closet" && (
             <>
-              {/* Mini Drama Alert Teaser if there's an active public_nudge */}
-              {publicNudgeCount > 0 && (
+              {/* Mini Drama Alert Teaser if there's an UNSEEN public_nudge */}
+              {hasUnseenPublicNudge && (
                 <button
                   type="button"
-                  onClick={() => setActiveViewTab("activity")}
+                  onClick={() => handleSwitchViewTab("activity")}
                   className="mt-3.5 flex w-full items-center justify-between gap-2 rounded-2xl border border-dusty-lilac bg-dusty-lilac/15 px-3.5 py-2.5 text-left transition hover:bg-dusty-lilac/25"
                 >
                   <div className="flex items-center gap-2 min-w-0">
@@ -477,7 +570,7 @@ export default function CircleDetailClient({
                 </button>
               )}
 
-              {/* MEMBER DRAWERS: Horizontal Scroll of Member Avatars */}
+              {/* MEMBER DRAWERS: Uniform Horizontal Scroll of Member Avatars */}
               <section aria-label="Circle Member Drawers" className="mt-4">
                 <div className="flex items-center justify-between px-1">
                   <div className="flex items-center gap-1.5">
@@ -486,27 +579,38 @@ export default function CircleDetailClient({
                       MEMBER CLOSET DRAWERS ({members.length})
                     </h2>
                   </div>
-                  {selectedOwnerId && (
+                  <div className="flex items-center gap-2">
+                    {selectedOwnerId && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedOwnerId(null)}
+                        className="font-mono text-[10px] font-bold text-french-navy underline hover:text-dusty-lilac"
+                      >
+                        Show All ({items.length})
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => setSelectedOwnerId(null)}
-                      className="font-mono text-[10px] font-bold text-french-navy underline hover:text-dusty-lilac"
+                      onClick={() => setIsManageMembersOpen(true)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-border-neutral bg-chalk px-2 py-1 font-mono text-[10px] font-bold text-midnight-slate transition hover:border-french-navy hover:text-french-navy"
                     >
-                      Show All ({items.length})
+                      <Settings2 className="h-3 w-3 text-dusty-lilac" />
+                      <span>
+                        {currentUserRole === "admin"
+                          ? "Manage Members"
+                          : "Members"}
+                      </span>
                     </button>
-                  )}
+                  </div>
                 </div>
 
-                <div className="mt-2.5 flex items-start gap-2.5 overflow-x-auto pb-2 pt-1 no-scrollbar">
-                  {/* "All Closets" Pill */}
+                <div className="mt-2.5 flex items-stretch gap-2.5 overflow-x-auto pb-2 pt-1 no-scrollbar">
+                  {/* "All Closets" Uniform Card */}
                   <button
                     type="button"
-                    onClick={() => {
-                      setSelectedOwnerId(null);
-                      setOpenAdminMenuUserId(null);
-                    }}
+                    onClick={() => setSelectedOwnerId(null)}
                     className={cn(
-                      "flex min-w-[78px] shrink-0 flex-col items-center rounded-2xl border p-2.5 text-center transition",
+                      "flex h-[108px] w-[88px] shrink-0 flex-col items-center justify-center rounded-2xl border p-2.5 text-center transition",
                       selectedOwnerId === null
                         ? "border-french-navy bg-french-navy text-white shadow-md"
                         : "border-border-neutral bg-chalk text-midnight-slate hover:border-dusty-lilac"
@@ -514,7 +618,7 @@ export default function CircleDetailClient({
                   >
                     <div
                       className={cn(
-                        "flex h-11 w-11 items-center justify-center rounded-full border text-xs font-extrabold",
+                        "flex h-11 w-11 shrink-0 items-center justify-center rounded-full border text-xs font-extrabold",
                         selectedOwnerId === null
                           ? "border-white/30 bg-white/15 text-white"
                           : "border-border-strong bg-buttercream text-french-navy"
@@ -535,14 +639,10 @@ export default function CircleDetailClient({
                     </span>
                   </button>
 
-                  {/* Individual Member Avatars */}
+                  {/* Individual Member Uniform Cards */}
                   {members.map((member) => {
                     const isSelected = selectedOwnerId === member.userId;
                     const isMe = member.userId === currentUserId;
-                    const canAdminManage =
-                      currentUserRole === "admin" && !isMe;
-                    const isAdminMenuOpen =
-                      openAdminMenuUserId === member.userId;
                     const count = memberItemCounts[member.userId] || 0;
                     const initials =
                       member.fullName
@@ -553,117 +653,53 @@ export default function CircleDetailClient({
                         .toUpperCase() || "DR";
 
                     return (
-                      <div
+                      <button
                         key={member.userId}
-                        className="relative flex shrink-0 flex-col items-center"
+                        type="button"
+                        onClick={() => handleSelectMemberAvatar(member.userId)}
+                        title={`Filter by ${member.fullName}'s garments`}
+                        className={cn(
+                          "flex h-[108px] w-[88px] shrink-0 flex-col items-center justify-center rounded-2xl border p-2.5 text-center transition focus:outline-none",
+                          isSelected
+                            ? "border-french-navy bg-french-navy text-white shadow-md"
+                            : "border-border-neutral bg-chalk text-midnight-slate hover:border-dusty-lilac"
+                        )}
                       >
-                        <div
-                          className={cn(
-                            "flex min-w-[88px] flex-col items-center rounded-2xl border p-2.5 text-center transition",
-                            isSelected
-                              ? "border-french-navy bg-french-navy text-white shadow-md"
-                              : "border-border-neutral bg-chalk text-midnight-slate hover:border-dusty-lilac"
-                          )}
-                        >
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleSelectMemberAvatar(member.userId)
-                            }
-                            className="flex flex-col items-center focus:outline-none"
-                            title={`Filter by ${member.fullName}'s garments`}
+                        <div className="relative">
+                          <div
+                            className={cn(
+                              "flex h-11 w-11 shrink-0 items-center justify-center rounded-full border text-xs font-extrabold uppercase transition",
+                              isSelected
+                                ? "border-white/30 bg-dusty-lilac text-white"
+                                : isMe
+                                ? "border-french-navy/30 bg-french-navy/10 text-french-navy"
+                                : "border-border-strong bg-buttercream text-midnight-slate"
+                            )}
                           >
-                            <div className="relative">
-                              <div
-                                className={cn(
-                                  "flex h-11 w-11 items-center justify-center rounded-full border text-xs font-extrabold uppercase transition",
-                                  isSelected
-                                    ? "border-white/30 bg-dusty-lilac text-white"
-                                    : isMe
-                                    ? "border-french-navy/30 bg-french-navy/10 text-french-navy"
-                                    : "border-border-strong bg-buttercream text-midnight-slate"
-                                )}
-                              >
-                                {initials}
-                              </div>
-                              {member.role === "admin" && (
-                                <span
-                                  className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-dusty-lilac text-white shadow-2xs"
-                                  title="Circle Admin"
-                                >
-                                  <Shield className="h-2.5 w-2.5" />
-                                </span>
-                              )}
-                            </div>
-
-                            <span className="mt-1.5 max-w-[76px] truncate text-[11px] font-bold">
-                              {isMe ? "You" : member.fullName.split(" ")[0]}
-                            </span>
+                            {initials}
+                          </div>
+                          {member.role === "admin" && (
                             <span
-                              className={cn(
-                                "font-mono text-[9px]",
-                                isSelected ? "text-white/80" : "text-muted"
-                              )}
+                              className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-dusty-lilac text-white shadow-2xs"
+                              title="Circle Admin"
                             >
-                              {count} {count === 1 ? "item" : "items"}
+                              <Shield className="h-2.5 w-2.5" />
                             </span>
-                          </button>
-
-                          {/* Admin Dropdown Trigger on Member Avatar */}
-                          {canAdminManage && (
-                            <div className="mt-1.5 w-full pt-1 border-t border-border-neutral/40">
-                              <button
-                                type="button"
-                                disabled={
-                                  isPending && activeActionId === member.userId
-                                }
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOpenAdminMenuUserId(
-                                    isAdminMenuOpen ? null : member.userId
-                                  );
-                                }}
-                                className={cn(
-                                  "inline-flex w-full items-center justify-center gap-0.5 rounded-lg px-1.5 py-0.5 font-mono text-[9px] font-bold transition",
-                                  isSelected
-                                    ? "bg-white/15 text-white hover:bg-white/25"
-                                    : "bg-buttercream text-french-navy hover:bg-french-navy hover:text-white"
-                                )}
-                                aria-expanded={isAdminMenuOpen}
-                                aria-haspopup="menu"
-                              >
-                                {isPending &&
-                                activeActionId === member.userId ? (
-                                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                                ) : (
-                                  <>
-                                    <span>Admin</span>
-                                    <ChevronDown className="h-2.5 w-2.5" />
-                                  </>
-                                )}
-                              </button>
-                            </div>
                           )}
                         </div>
 
-                        {/* Admin Dropdown Menu ('Remove Member') */}
-                        {canAdminManage && isAdminMenuOpen && (
-                          <div
-                            role="menu"
-                            className="absolute top-full z-30 mt-1 w-36 rounded-xl border border-border-strong bg-white p-1.5 shadow-xl animate-in fade-in zoom-in-95 duration-100"
-                          >
-                            <button
-                              type="button"
-                              role="menuitem"
-                              onClick={() => handleRemoveMember(member)}
-                              className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-2 text-left text-[11px] font-bold text-rose-600 transition hover:bg-rose-50"
-                            >
-                              <UserMinus className="h-3.5 w-3.5 shrink-0" />
-                              <span>Remove Member</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                        <span className="mt-1.5 w-full truncate text-[11px] font-bold">
+                          {isMe ? "You" : member.fullName.split(" ")[0]}
+                        </span>
+                        <span
+                          className={cn(
+                            "font-mono text-[9px]",
+                            isSelected ? "text-white/80" : "text-muted"
+                          )}
+                        >
+                          {count} {count === 1 ? "item" : "items"}
+                        </span>
+                      </button>
                     );
                   })}
                 </div>
@@ -883,15 +919,60 @@ export default function CircleDetailClient({
 
                             {/* Action Callout Button */}
                             <div className="mt-2.5 pt-2 border-t border-border-neutral/60">
-                              {isOwner ? (
+                              {item.status === "Lent Out" &&
+                              (isOwner ||
+                                item.borrowed_by === currentUserId) ? (
+                                <button
+                                  type="button"
+                                  disabled={
+                                    isPending &&
+                                    activeActionId === `resolve-item-${item.id}`
+                                  }
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleResolveDrama({
+                                      itemId: item.id,
+                                      actionKey: `resolve-item-${item.id}`,
+                                    });
+                                  }}
+                                  className="inline-flex w-full items-center justify-center gap-1 rounded-lg bg-emerald-600 py-1.5 font-mono text-[10px] font-bold text-white shadow-2xs transition hover:bg-emerald-700 active:scale-95 disabled:opacity-50"
+                                >
+                                  {isPending &&
+                                  activeActionId ===
+                                    `resolve-item-${item.id}` ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <Check className="h-3 w-3 stroke-[3]" />
+                                  )}
+                                  <span>Mark Returned ✨</span>
+                                </button>
+                              ) : isOwner ? (
                                 <span className="inline-flex w-full items-center justify-center rounded-lg bg-buttercream py-1.5 font-mono text-[10px] font-bold text-muted">
                                   Manage Your Piece →
                                 </span>
                               ) : hasPendingDibs ? (
-                                <span className="inline-flex w-full items-center justify-center gap-1 rounded-lg bg-dusty-lilac/15 py-1.5 font-mono text-[10px] font-bold text-french-navy">
-                                  <Clock className="h-3 w-3 text-dusty-lilac" />
-                                  Dibs Requested
-                                </span>
+                                <button
+                                  type="button"
+                                  disabled={
+                                    isPending &&
+                                    activeActionId ===
+                                      `cancel-borrow-${item.id}`
+                                  }
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCancelBorrow(item.id);
+                                  }}
+                                  className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-rose-200 bg-rose-50 py-1.5 font-mono text-[10px] font-bold text-rose-600 transition hover:bg-rose-100 active:scale-95 disabled:opacity-50"
+                                >
+                                  {isPending &&
+                                  activeActionId ===
+                                    `cancel-borrow-${item.id}` ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <X className="h-3 w-3" />
+                                  )}
+                                  <span>Cancel Request</span>
+                                </button>
                               ) : isAvailable ? (
                                 <button
                                   type="button"
@@ -961,7 +1042,7 @@ export default function CircleDetailClient({
                   </p>
                   <button
                     type="button"
-                    onClick={() => setActiveViewTab("closet")}
+                    onClick={() => handleSwitchViewTab("closet")}
                     className="mt-4 rounded-xl bg-french-navy px-4 py-2 text-xs font-bold text-white shadow-xs transition hover:bg-french-navy-hover"
                   >
                     Browse Circle Closet →
@@ -1104,6 +1185,15 @@ export default function CircleDetailClient({
                     }
 
                     if (isPublicNudge) {
+                      const targetGarment = act.target_item_id
+                        ? items.find((i) => i.id === act.target_item_id) || null
+                        : null;
+                      const canResolveDrama =
+                        act.actor_id === currentUserId ||
+                        currentUserRole === "admin" ||
+                        targetGarment?.owner_id === currentUserId ||
+                        targetGarment?.borrowed_by === currentUserId;
+
                       return (
                         <div
                           key={act.id}
@@ -1152,6 +1242,37 @@ export default function CircleDetailClient({
                               </p>
                             </div>
                           </div>
+
+                          {canResolveDrama && (
+                            <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/25 pt-3">
+                              <span className="font-mono text-[10px] font-semibold text-white/90">
+                                Item back safe &amp; sound?
+                              </span>
+                              <button
+                                type="button"
+                                disabled={
+                                  isPending &&
+                                  activeActionId === `resolve-act-${act.id}`
+                                }
+                                onClick={() =>
+                                  handleResolveDrama({
+                                    itemId: act.target_item_id,
+                                    activityId: act.id,
+                                    actionKey: `resolve-act-${act.id}`,
+                                  })
+                                }
+                                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-french-navy px-3 py-1.5 text-[11px] font-extrabold text-white shadow-xs transition hover:bg-french-navy-hover active:scale-95 disabled:opacity-50"
+                              >
+                                {isPending &&
+                                activeActionId === `resolve-act-${act.id}` ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Check className="h-3.5 w-3.5 text-emerald-300 stroke-[3]" />
+                                )}
+                                <span>🕊️ Resolve Drama &amp; Mark Returned</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       );
                     }
@@ -1241,6 +1362,143 @@ export default function CircleDetailClient({
           router.refresh();
         }}
       />
+
+      {/* Manage Circle Members Modal */}
+      {isManageMembersOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-midnight-slate/60 p-4 backdrop-blur-xs animate-in fade-in duration-150"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="manage-circle-members-title"
+        >
+          <div className="w-full max-w-sm rounded-3xl border border-border-neutral bg-buttercream p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-dusty-lilac">
+                  CIRCLE ROSTER // {circle.name}
+                </p>
+                <h2
+                  id="manage-circle-members-title"
+                  className="mt-0.5 text-base font-extrabold text-midnight-slate"
+                >
+                  {currentUserRole === "admin"
+                    ? "Manage Circle Members"
+                    : "Circle Members"}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsManageMembersOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-border-neutral bg-chalk text-muted transition hover:text-midnight-slate"
+                aria-label="Close member management"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 max-h-72 space-y-2 overflow-y-auto pr-1">
+              {members.map((member) => {
+                const isMe = member.userId === currentUserId;
+                const count = memberItemCounts[member.userId] || 0;
+                const initials =
+                  member.fullName
+                    .split(" ")
+                    .map((part) => part[0])
+                    .join("")
+                    .slice(0, 2)
+                    .toUpperCase() || "DR";
+
+                return (
+                  <div
+                    key={member.userId}
+                    className="flex items-center justify-between gap-2.5 rounded-2xl border border-border-neutral bg-chalk p-3"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border-strong bg-buttercream text-xs font-extrabold text-french-navy">
+                        {initials}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <p className="truncate text-xs font-bold text-midnight-slate">
+                            {isMe ? `${member.fullName} (You)` : member.fullName}
+                          </p>
+                          {member.role === "admin" && (
+                            <span className="inline-flex items-center gap-0.5 rounded bg-french-navy/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-french-navy">
+                              <Shield className="h-2.5 w-2.5" />
+                              ADMIN
+                            </span>
+                          )}
+                        </div>
+                        <p className="truncate font-mono text-[10px] text-muted">
+                          {count} shared {count === 1 ? "item" : "items"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {currentUserRole === "admin" &&
+                      !isMe &&
+                      member.role !== "admin" && (
+                        <button
+                          type="button"
+                          disabled={
+                            isPending && activeActionId === member.userId
+                          }
+                          onClick={() => handleRemoveMember(member)}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[10px] font-bold text-rose-600 transition hover:bg-rose-100 disabled:opacity-50"
+                        >
+                          {isPending && activeActionId === member.userId ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <UserMinus className="h-3 w-3" />
+                          )}
+                          <span>Remove</span>
+                        </button>
+                      )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 flex items-center justify-between gap-2 border-t border-border-neutral pt-3.5">
+              {currentUserRole !== "admin" ? (
+                <button
+                  type="button"
+                  disabled={isPending && activeActionId === "leave-circle"}
+                  onClick={handleLeaveCircle}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-600 transition hover:bg-rose-100 disabled:opacity-50"
+                >
+                  {isPending && activeActionId === "leave-circle" ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <LogOut className="h-3.5 w-3.5" />
+                  )}
+                  <span>Leave Circle</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsManageMembersOpen(false);
+                    setIsAddFriendsOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-french-navy px-3.5 py-2 text-xs font-bold text-white shadow-2xs transition hover:bg-french-navy-hover"
+                >
+                  <UserPlus className="h-3.5 w-3.5" />
+                  <span>+ Invite Friends</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setIsManageMembersOpen(false)}
+                className="rounded-xl border border-border-neutral bg-chalk px-3.5 py-2 text-xs font-bold text-midnight-slate transition hover:border-french-navy"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Invite Friends Modal */}
       <AddFriendsToCircleModal

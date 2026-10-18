@@ -27,7 +27,11 @@ import {
   updateItemTags,
   deleteItem,
 } from "@/app/items/actions";
-import { nudgeReturn } from "@/app/sharedrobe/actions";
+import {
+  nudgeReturn,
+  resolveBorrowDrama,
+  cancelBorrowRequest,
+} from "@/app/sharedrobe/actions";
 import {
   ALLOWED_ITEM_STATUSES,
   ALLOWED_ITEM_TAGS,
@@ -76,7 +80,14 @@ export default function ItemDetailClient({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [activeAction, setActiveAction] = useState<
-    "status" | "tags" | "delete" | "nudge_private" | "nudge_public" | null
+    | "status"
+    | "tags"
+    | "delete"
+    | "nudge_private"
+    | "nudge_public"
+    | "resolve_drama"
+    | "cancel_borrow"
+    | null
   >(null);
 
   // Status state
@@ -222,6 +233,52 @@ export default function ItemDetailClient({
       setIsNudgeModalOpen(false);
 
       if (res.success) {
+        showFeedback("success", res.message);
+        router.refresh();
+      } else {
+        showFeedback("error", res.error);
+      }
+    });
+  };
+
+  // Resolve Borrow Drama & Mark Item Returned
+  const handleResolveDrama = () => {
+    if (isPending) return;
+
+    setActiveAction("resolve_drama");
+    startTransition(async () => {
+      const res = await resolveBorrowDrama({
+        itemId: item.id,
+        circleId: borrowCircle?.id ?? null,
+      });
+      setActiveAction(null);
+
+      if (res.success) {
+        setCurrentStatus("Available");
+        setSelectedBorrowerId(null);
+        showFeedback("success", res.message);
+        router.refresh();
+      } else {
+        showFeedback("error", res.error);
+      }
+    });
+  };
+
+  // Cancel Pending Borrow Request before Lender Approves
+  const handleCancelBorrowRequest = () => {
+    if (isPending) return;
+
+    setActiveAction("cancel_borrow");
+    startTransition(async () => {
+      const res = await cancelBorrowRequest({
+        requestId: initialPendingBorrowRequest?.id ?? null,
+        itemId: item.id,
+        circleId: borrowCircle?.id ?? null,
+      });
+      setActiveAction(null);
+
+      if (res.success) {
+        setHasRequestedBorrow(false);
         showFeedback("success", res.message);
         router.refresh();
       } else {
@@ -412,40 +469,87 @@ export default function ItemDetailClient({
                   </button>
                 )}
 
-                {/* LENDER CONTROLS: 'Ask for it back' when item is Lent Out */}
-                {item.status === "Lent Out" && item.borrowedBy && (
+                {/* LENDER CONTROLS: 'Ask for it back' OR 'Mark Returned & Resolve Drama' when item is Lent Out */}
+                {item.status === "Lent Out" && (
                   <div className="pt-1 border-t border-border-neutral/70">
-                    <div className="flex items-center justify-between gap-2 rounded-xl border border-dusty-lilac/40 bg-dusty-lilac/15 p-3">
-                      <div className="min-w-0">
-                        <p className="font-mono text-[9px] font-extrabold uppercase tracking-wider text-french-navy">
-                          LENDER CONTROLS // ON LOAN
-                        </p>
-                        <p className="mt-0.5 truncate text-xs font-bold text-midnight-slate">
-                          With {item.borrowerName || "a friend"} right now
-                        </p>
+                    <div className="space-y-2.5 rounded-xl border border-dusty-lilac/40 bg-dusty-lilac/15 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-mono text-[9px] font-extrabold uppercase tracking-wider text-french-navy">
+                            LENDER CONTROLS // ON LOAN
+                          </p>
+                          <p className="mt-0.5 truncate text-xs font-bold text-midnight-slate">
+                            With {item.borrowerName || "a friend"} right now
+                          </p>
+                        </div>
+
+                        {item.borrowedBy && (
+                          <button
+                            type="button"
+                            disabled={isPending}
+                            onClick={() => setIsNudgeModalOpen(true)}
+                            className="flex shrink-0 items-center gap-1.5 rounded-xl bg-french-navy px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-french-navy-hover active:scale-95 disabled:opacity-50"
+                          >
+                            <Megaphone size={13} className="text-dusty-lilac" />
+                            <span>Ask for it back</span>
+                          </button>
+                        )}
                       </div>
 
                       <button
                         type="button"
-                        disabled={isPending}
-                        onClick={() => setIsNudgeModalOpen(true)}
-                        className="flex shrink-0 items-center gap-1.5 rounded-xl bg-french-navy px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-french-navy-hover active:scale-95 disabled:opacity-50"
+                        disabled={isPending && activeAction === "resolve_drama"}
+                        onClick={handleResolveDrama}
+                        className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-extrabold text-white shadow-xs transition hover:bg-emerald-700 active:scale-95 disabled:opacity-50"
                       >
-                        <Megaphone size={13} className="text-dusty-lilac" />
-                        <span>Ask for it back</span>
+                        {isPending && activeAction === "resolve_drama" ? (
+                          <>
+                            <Loader2 size={13} className="animate-spin" />
+                            <span>Resolving &amp; Marking Returned...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check size={13} strokeWidth={3} />
+                            <span>🕊️ Mark Returned &amp; Resolve Drama</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>
                 )}
               </div>
             ) : (
-              <div className="flex items-center justify-between rounded-xl bg-white p-2.5">
-                <span className="text-xs font-bold text-midnight-slate">
-                  {item.status}
-                </span>
-                <span className="text-[11px] text-muted">
-                  Owner: {item.ownerName}
-                </span>
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between rounded-xl bg-white p-2.5">
+                  <span className="text-xs font-bold text-midnight-slate">
+                    {item.status}
+                  </span>
+                  <span className="text-[11px] text-muted">
+                    Owner: {item.ownerName}
+                  </span>
+                </div>
+
+                {item.status === "Lent Out" &&
+                  item.borrowedBy === currentUserId && (
+                    <button
+                      type="button"
+                      disabled={isPending && activeAction === "resolve_drama"}
+                      onClick={handleResolveDrama}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-extrabold text-white shadow-xs transition hover:bg-emerald-700 active:scale-95 disabled:opacity-50"
+                    >
+                      {isPending && activeAction === "resolve_drama" ? (
+                        <>
+                          <Loader2 size={13} className="animate-spin" />
+                          <span>Returning &amp; Resolving...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check size={13} strokeWidth={3} />
+                          <span>🕊️ Confirm Returned &amp; Resolve Drama</span>
+                        </>
+                      )}
+                    </button>
+                  )}
               </div>
             )}
           </section>
@@ -525,20 +629,40 @@ export default function ItemDetailClient({
           ) : (
             <section className="pt-2">
               {hasRequestedBorrow ? (
-                <button
-                  type="button"
-                  disabled
-                  className="w-full flex items-center justify-center gap-2 rounded-2xl border border-dusty-lilac bg-dusty-lilac/15 p-3.5 text-xs font-bold text-french-navy shadow-2xs cursor-default"
-                >
-                  <Clock size={15} className="text-dusty-lilac" />
-                  <span>
-                    Borrow Request Pending
-                    {initialPendingBorrowRequest?.durationIntent
-                      ? ` (${initialPendingBorrowRequest.durationIntent})`
-                      : ""}{" "}
-                    ✨
-                  </span>
-                </button>
+                <div className="flex flex-col gap-2.5 rounded-2xl border border-dusty-lilac bg-dusty-lilac/15 p-3.5 shadow-2xs sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Clock size={16} className="shrink-0 text-dusty-lilac" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-extrabold text-french-navy">
+                        Borrow Request Pending ✨
+                      </p>
+                      {initialPendingBorrowRequest?.durationIntent && (
+                        <p className="truncate font-mono text-[10px] font-semibold text-dusty-lilac">
+                          ⏳ &ldquo;{initialPendingBorrowRequest.durationIntent}&rdquo;
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isPending && activeAction === "cancel_borrow"}
+                    onClick={handleCancelBorrowRequest}
+                    className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-bold text-rose-600 shadow-2xs transition hover:border-rose-300 hover:bg-rose-50 active:scale-95 disabled:opacity-50"
+                  >
+                    {isPending && activeAction === "cancel_borrow" ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>Cancelling...</span>
+                      </>
+                    ) : (
+                      <>
+                        <X size={13} strokeWidth={2.5} />
+                        <span>Cancel Request</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               ) : item.status === "Available" && borrowCircle ? (
                 <button
                   type="button"

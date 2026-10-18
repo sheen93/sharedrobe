@@ -652,31 +652,6 @@ export default function SharedrobeClient({
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                          <Link
-                            href={`/sharedrobe/${circle.id}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="flex items-center gap-1 rounded-lg bg-french-navy px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-french-navy-hover shadow-2xs active:scale-95"
-                            title="Open Circle Closet & Member Drawers"
-                          >
-                            <span>Open Circle</span>
-                            <ChevronRight size={11} strokeWidth={2.5} />
-                          </Link>
-
-                          {isCircleAdmin && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setAddFriendsModalCircle(circle);
-                              }}
-                              className="flex items-center gap-1 rounded-lg border border-border-neutral bg-buttercream px-2 py-1 text-[10px] font-bold text-french-navy transition hover:bg-french-navy hover:text-white shadow-2xs active:scale-95"
-                              title="Add friends to this circle"
-                            >
-                              <UserPlus size={11} strokeWidth={2.5} />
-                              <span className="hidden sm:inline">Add Friends</span>
-                            </button>
-                          )}
-
                           <ChevronRight
                             className={cn(
                               "h-4 w-4 text-muted transition duration-200",
