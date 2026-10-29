@@ -1,16 +1,26 @@
 "use client";
 
-import React, { useState, useRef, KeyboardEvent } from "react";
+import React, { useState, useRef, useEffect, KeyboardEvent } from "react";
 import Image from "next/image";
-import Link from "next/link";
-import { Camera, X, Loader2, AlertCircle, LogIn, Sparkles } from "lucide-react";
+import {
+  Camera,
+  X,
+  Loader2,
+  AlertCircle,
+  Sparkles,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Trash2,
+  Check,
+} from "lucide-react";
 import imageCompression from "browser-image-compression";
 import { createClient } from "@/utils/supabase/client";
 import {
   type FormError,
   type ValidEnumCategory,
   VALID_ENUM_CATEGORIES,
-  validateUploadInputs,
+  isValidCategory,
   resolveSessionError,
   resolveStorageError,
   resolveDatabaseError,
@@ -25,9 +35,12 @@ interface AddItemModalProps {
 /**
  * Category options adhering strictly to the PostgreSQL enum `item_category` values:
  * Tops, Bottoms, Dresses, Outerwear, Shoes, Bags, Accessories.
- * UI labels provide rich contextual hints while `value` guarantees database enum integrity.
  */
-const CATEGORY_OPTIONS: { value: ValidEnumCategory; label: string; hint: string }[] = [
+const CATEGORY_OPTIONS: {
+  value: ValidEnumCategory;
+  label: string;
+  hint: string;
+}[] = [
   { value: "Tops", label: "Tops", hint: "Shirts, blouses, knitwear, tees" },
   { value: "Bottoms", label: "Bottoms", hint: "Jeans, trousers, skirts, shorts" },
   { value: "Dresses", label: "Dresses", hint: "Midi, maxi, cocktail, jumpsuits" },
@@ -37,87 +50,291 @@ const CATEGORY_OPTIONS: { value: ValidEnumCategory; label: string; hint: string 
   { value: "Accessories", label: "Accessories", hint: "Jewelry, scarves, belts, hats" },
 ];
 
-type UploadStep = "idle" | "compressing" | "uploading_storage" | "saving_db";
+export interface DraftItem {
+  id: string;
+  file: File | null;
+  previewUrl: string;
+  existingImageUrl?: string | null;
+  title: string;
+  category: ValidEnumCategory;
+  tags: string[];
+  isSharable: boolean;
+}
 
-export default function AddItemModal({ isOpen, onClose, onSuccess }: AddItemModalProps) {
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
-  const [category, setCategory] = useState<ValidEnumCategory>(VALID_ENUM_CATEGORIES[0]);
-  const [tagInput, setTagInput] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
+type UploadStep = "idle" | "uploading_storage" | "saving_db";
+
+export default function AddItemModal({
+  isOpen,
+  onClose,
+  onSuccess,
+}: AddItemModalProps) {
+  const [drafts, setDrafts] = useState<DraftItem[]>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [isCompressing, setIsCompressing] = useState(false);
   const [uploadStep, setUploadStep] = useState<UploadStep>("idle");
+  const [uploadProgress, setUploadProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
   const [formError, setFormError] = useState<FormError | null>(null);
+
+  // Default / Sticky state
+  const [defaultCategory, setDefaultCategory] = useState<ValidEnumCategory>(
+    VALID_ENUM_CATEGORIES[0]
+  );
+  const [defaultTags, setDefaultTags] = useState<string[]>([]);
+  const [defaultTitle, setDefaultTitle] = useState("");
+  const [defaultIsSharable, setDefaultIsSharable] = useState(true);
+
+  // Tag input for current active draft
+  const [tagInput, setTagInput] = useState("");
+
+  // Touch gesture support for swipeable cards
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
 
+  // Initialize from duplicate state or sticky defaults when modal opens
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const timer = setTimeout(() => {
+      // 1. Check for Duplicate Item payload
+      try {
+        const duplicateRaw = localStorage.getItem("sharedrobe_duplicate_item");
+        if (duplicateRaw) {
+          const dup = JSON.parse(duplicateRaw);
+          localStorage.removeItem("sharedrobe_duplicate_item");
+
+          const targetCategory = (
+            isValidCategory(dup.category) ? dup.category : VALID_ENUM_CATEGORIES[0]
+          ) as ValidEnumCategory;
+          const targetTags = Array.isArray(dup.tags) ? dup.tags : [];
+          const targetTitle = typeof dup.title === "string" ? dup.title : "";
+          const targetSharable = dup.is_sharable !== false;
+
+          setDefaultCategory(targetCategory);
+          setDefaultTags(targetTags);
+          setDefaultTitle(targetTitle);
+          setDefaultIsSharable(targetSharable);
+
+          if (dup.imageUrl) {
+            // 'Yes' branch: pass existing image URL to upload state
+            const dupDraft: DraftItem = {
+              id: `dup-${Date.now()}`,
+              file: null,
+              previewUrl: dup.imageUrl,
+              existingImageUrl: dup.imageUrl,
+              title: targetTitle || "Duplicate Garment",
+              category: targetCategory,
+              tags: targetTags,
+              isSharable: targetSharable,
+            };
+            setDrafts([dupDraft]);
+            setActiveIndex(0);
+            return;
+          } else {
+            // 'No' branch: pre-fill category/tags/sharable, require new photo
+            setDrafts([]);
+            setActiveIndex(0);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn("Could not parse duplicate item from localStorage:", e);
+      }
+
+      // 2. Check for Sticky Defaults if no duplicate payload was found
+      try {
+        const stickyRaw = localStorage.getItem("sharedrobe_sticky_defaults");
+        if (stickyRaw) {
+          const sticky = JSON.parse(stickyRaw);
+          if (sticky.category && isValidCategory(sticky.category)) {
+            setDefaultCategory(sticky.category);
+          }
+          if (Array.isArray(sticky.tags)) {
+            setDefaultTags(sticky.tags);
+          }
+        }
+      } catch (e) {
+        console.warn("Could not parse sticky defaults from localStorage:", e);
+      }
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
+  const currentDraft = drafts[activeIndex] || null;
+
+  // Multi-file selection handler with client-side compression
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files?.[0];
-    if (!selected) return;
+    const selectedFiles = e.target.files;
+    if (!selectedFiles || selectedFiles.length === 0) return;
 
     setFormError(null);
-    setUploadStep("compressing");
+    setIsCompressing(true);
 
-    try {
-      const options = { maxSizeMB: 0.8, maxWidthOrHeight: 1200, useWebWorker: true };
-      const compressedFile = await imageCompression(selected, options);
-      setFile(compressedFile);
-      setPreview(URL.createObjectURL(compressedFile));
-    } catch {
-      // Fallback to original file if client-side compression fails
-      setFile(selected);
-      setPreview(URL.createObjectURL(selected));
-    } finally {
-      setUploadStep("idle");
+    const newDrafts: DraftItem[] = [];
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const rawFile = selectedFiles[i];
+      let compressed = rawFile;
+      try {
+        const options = {
+          maxSizeMB: 0.8,
+          maxWidthOrHeight: 1200,
+          useWebWorker: true,
+        };
+        compressed = await imageCompression(rawFile, options);
+      } catch {
+        compressed = rawFile;
+      }
+
+      // Keep items in in-memory React state using URL.createObjectURL()
+      const previewUrl = URL.createObjectURL(compressed);
+
+      newDrafts.push({
+        id: `${Date.now()}-${i}-${Math.random().toString(36).substring(2, 7)}`,
+        file: compressed,
+        previewUrl,
+        existingImageUrl: null,
+        title:
+          newDrafts.length === 0 && drafts.length === 0 && defaultTitle
+            ? defaultTitle
+            : "",
+        category: defaultCategory,
+        tags: [...defaultTags],
+        isSharable: defaultIsSharable,
+      });
+    }
+
+    setDrafts((prev) => [...prev, ...newDrafts]);
+    setIsCompressing(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   };
 
+  // Helper to update fields on the current active draft
+  const updateCurrentDraft = (fields: Partial<DraftItem>) => {
+    if (!currentDraft) return;
+    setDrafts((prev) =>
+      prev.map((d, idx) => (idx === activeIndex ? { ...d, ...fields } : d))
+    );
+  };
+
+  // Tag addition for current draft
   const handleKeyDownTag = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
       const cleanTag = tagInput.trim().toLowerCase().replace(/^#/, "");
-      if (cleanTag && !tags.includes(cleanTag)) {
-        setTags([...tags, cleanTag]);
+      if (cleanTag && currentDraft && !currentDraft.tags.includes(cleanTag)) {
+        updateCurrentDraft({ tags: [...currentDraft.tags, cleanTag] });
       }
       setTagInput("");
     }
   };
 
-  const removeTag = (tagToRemove: string) => setTags(tags.filter((t) => t !== tagToRemove));
+  const removeTagFromCurrentDraft = (tagToRemove: string) => {
+    if (!currentDraft) return;
+    updateCurrentDraft({
+      tags: currentDraft.tags.filter((t) => t !== tagToRemove),
+    });
+  };
 
+  // Remove a draft from the in-memory array
+  const handleRemoveDraft = (indexToRemove: number) => {
+    const draftToRemove = drafts[indexToRemove];
+    if (draftToRemove?.file && draftToRemove.previewUrl) {
+      URL.revokeObjectURL(draftToRemove.previewUrl);
+    }
+
+    setDrafts((prev) => {
+      const updated = prev.filter((_, idx) => idx !== indexToRemove);
+      if (activeIndex >= updated.length) {
+        setActiveIndex(Math.max(0, updated.length - 1));
+      }
+      return updated;
+    });
+  };
+
+  // Reset form and revoke all allocated object URLs
   const resetForm = () => {
-    setFile(null);
-    setPreview(null);
-    setTitle("");
-    setCategory(VALID_ENUM_CATEGORIES[0]);
-    setTags([]);
-    setTagInput("");
+    drafts.forEach((d) => {
+      if (d.file && d.previewUrl) {
+        URL.revokeObjectURL(d.previewUrl);
+      }
+    });
+    setDrafts([]);
+    setActiveIndex(0);
     setFormError(null);
     setUploadStep("idle");
+    setUploadProgress(null);
+    setTagInput("");
   };
 
   const handleClose = () => {
-    if (uploadStep !== "idle") return; // prevent closing while uploading
+    if (uploadStep !== "idle") return; // Prevent closing mid-upload
     resetForm();
     onClose();
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Touch handlers for swipeable card iteration
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStartX(e.touches[0].clientX);
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX === null) return;
+    const touchEndX = e.changedTouches[0].clientX;
+    const diff = touchStartX - touchEndX;
+
+    if (diff > 50 && activeIndex < drafts.length - 1) {
+      setActiveIndex(activeIndex + 1);
+    } else if (diff < -50 && activeIndex > 0) {
+      setActiveIndex(activeIndex - 1);
+    }
+    setTouchStartX(null);
+  };
+
+  // Final Submit Handler: Uploads all in-memory drafts to storage and database
+  const handleUploadAll = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
-    // Scenario 1: User attempts to upload without selecting a file, title, or valid category
-    const inputError = validateUploadInputs(file, title, category);
-    if (inputError) {
-      setFormError(inputError);
+    if (drafts.length === 0) {
+      setFormError({
+        type: "no_file",
+        message:
+          "Please select at least one garment photo before uploading.",
+      });
       return;
     }
 
+    // Validate that all drafts have titles and valid categories
+    for (let i = 0; i < drafts.length; i++) {
+      const d = drafts[i];
+      if (!d.title || !d.title.trim()) {
+        setActiveIndex(i);
+        setFormError({
+          type: "no_title",
+          message: `Please enter a name for garment #${i + 1} (${d.category}).`,
+        });
+        return;
+      }
+      if (!isValidCategory(d.category)) {
+        setActiveIndex(i);
+        setFormError({
+          type: "enum_violation",
+          message: `Invalid clothing category for garment #${i + 1}.`,
+        });
+        return;
+      }
+    }
+
     try {
-      // Scenario 2: User session verification (Session expires mid-upload)
       setUploadStep("uploading_storage");
       const {
         data: { user },
@@ -132,54 +349,90 @@ export default function AddItemModal({ isOpen, onClose, onSuccess }: AddItemModa
       }
 
       const userId = user.id;
-      const fileExt = file ? file.name.split(".").pop() || "jpg" : "jpg";
-      const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-      const fileName = `${uniqueSuffix}.${fileExt}`;
-      const filePath = `${userId}/${fileName}`;
 
-      // Scenario 3: Storage bucket upload and rejection handling (404 missing, 403 denied, payload too large, network)
-      const { error: uploadError } = await supabase.storage
-        .from("wardrobe")
-        .upload(filePath, file as File, {
-          cacheControl: "3600",
-          upsert: false,
+      // Iterate and upload each draft sequentially
+      for (let i = 0; i < drafts.length; i++) {
+        const d = drafts[i];
+        setUploadProgress({ current: i + 1, total: drafts.length });
+
+        let finalImageUrl = d.existingImageUrl || "";
+
+        // Upload file to Supabase storage if file is present
+        if (d.file) {
+          const fileExt = d.file.name.split(".").pop() || "jpg";
+          const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+          const fileName = `${uniqueSuffix}.${fileExt}`;
+          const filePath = `${userId}/${fileName}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from("wardrobe")
+            .upload(filePath, d.file, {
+              cacheControl: "3600",
+              upsert: false,
+            });
+
+          if (uploadError) {
+            const storageError = resolveStorageError(uploadError);
+            setFormError(storageError);
+            setUploadStep("idle");
+            return;
+          }
+
+          const {
+            data: { publicUrl },
+          } = supabase.storage.from("wardrobe").getPublicUrl(filePath);
+          finalImageUrl = publicUrl;
+        }
+
+        // Insert garment record with plural Postgres enum `item_category`
+        setUploadStep("saving_db");
+        const { error: dbError } = await supabase.from("items").insert({
+          title: d.title.trim(),
+          category: d.category,
+          tags: d.tags,
+          image_url: finalImageUrl,
+          owner_id: userId,
+          is_sharable: d.isSharable,
         });
 
-      if (uploadError) {
-        const storageError = resolveStorageError(uploadError);
-        setFormError(storageError);
-        setUploadStep("idle");
-        return;
+        if (dbError) {
+          const databaseError = resolveDatabaseError(dbError);
+          setFormError(databaseError);
+          setUploadStep("idle");
+          return;
+        }
       }
 
-      // Extract Public URL
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("wardrobe").getPublicUrl(filePath);
+      // Sticky Defaults: Save last uploaded category and tags to localStorage
+      const lastDraft = drafts[drafts.length - 1];
+      if (lastDraft) {
+        try {
+          localStorage.setItem(
+            "sharedrobe_sticky_defaults",
+            JSON.stringify({
+              category: lastDraft.category,
+              tags: lastDraft.tags,
+            })
+          );
+        } catch (storageErr) {
+          console.warn("Could not persist sticky defaults:", storageErr);
+        }
+      }
 
-      // Scenario 4: Database insert with explicit plural category ENUM, owner_id, and RLS handling
-      setUploadStep("saving_db");
-      const { error: dbError } = await supabase.from("items").insert({
-        title: title.trim(),
-        category, // Strictly matches Postgres enum `item_category`
-        tags,
-        image_url: publicUrl,
-        owner_id: userId,
+      // Revoke in-memory object URLs
+      drafts.forEach((d) => {
+        if (d.file && d.previewUrl) {
+          URL.revokeObjectURL(d.previewUrl);
+        }
       });
 
-      if (dbError) {
-        const databaseError = resolveDatabaseError(dbError);
-        setFormError(databaseError);
-        setUploadStep("idle");
-        return;
-      }
-
-      // Success
       resetForm();
       onSuccess();
     } catch (err: unknown) {
       const message =
-        err instanceof Error ? err.message : "An unexpected error occurred during item upload.";
+        err instanceof Error
+          ? err.message
+          : "An unexpected error occurred during bulk garment upload.";
       setFormError({
         type: "generic",
         message,
@@ -197,184 +450,314 @@ export default function AddItemModal({ isOpen, onClose, onSuccess }: AddItemModa
         <div className="flex items-center justify-between border-b border-border-neutral pb-4">
           <div>
             <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-dusty-lilac">
-              DIRECTORY // ADD_ITEM
+              DIRECTORY // BULK_UPLOAD
             </span>
-            <h2 className="text-xl font-bold tracking-tight text-french-navy">Add to Wardrobe</h2>
+            <h2 className="text-xl font-bold tracking-tight text-midnight-slate">
+              {drafts.length > 1
+                ? `Add ${drafts.length} Garments`
+                : "Add to Closet"}
+            </h2>
           </div>
           <button
-            type="button"
             onClick={handleClose}
             disabled={isSubmitting}
-            className="rounded-full p-1 text-muted transition hover:text-midnight-slate disabled:opacity-40"
+            className="rounded-full p-2 text-muted transition-colors hover:bg-chalk hover:text-midnight-slate active:scale-95 disabled:opacity-50"
+            aria-label="Close modal"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
-        {/* Human-Readable Error Banners */}
+        {/* Error Boundary Notification */}
         {formError && (
-          <div
-            role="alert"
-            className="mt-4 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 p-3.5 text-xs text-red-800"
-          >
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+          <div className="mt-4 flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50/70 p-3.5 text-xs text-rose-900 shadow-2xs">
+            <AlertCircle size={16} className="mt-0.5 shrink-0 text-rose-600" />
             <div className="flex-1">
               <p className="font-semibold">{formError.message}</p>
-              {formError.type === "session_expired" && (
-                <div className="mt-2">
-                  <Link
-                    href="/login"
-                    className="inline-flex items-center gap-1 rounded-lg bg-french-navy px-3 py-1.5 text-[11px] font-bold text-white shadow-xs hover:bg-french-navy-hover transition"
-                  >
-                    <LogIn size={12} /> Sign In to Continue
-                  </Link>
-                </div>
-              )}
             </div>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-4">
-          {/* Photo Picker */}
-          <div
-            onClick={() => {
-              if (!isSubmitting) fileInputRef.current?.click();
-            }}
-            className={`group relative flex h-52 w-full cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed bg-chalk transition ${
-              formError?.type === "no_file"
-                ? "border-red-400 bg-red-50/40"
-                : "border-border-strong hover:border-dusty-lilac"
-            }`}
-          >
-            {preview ? (
-              <Image
-                src={preview}
-                alt="Selected garment preview"
-                fill
-                unoptimized
-                className="object-cover"
-              />
-            ) : (
-              <div className="flex flex-col items-center gap-2 text-muted transition group-hover:text-french-navy">
-                <Camera size={36} className="text-dusty-lilac" />
-                <span className="text-xs font-semibold uppercase tracking-wider">
-                  Tap to snap or select photo
-                </span>
-                <span className="text-[10px] text-muted">JPEG, PNG, WebP supported</span>
+        {/* Hidden Multi-file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={handleImageSelect}
+          className="hidden"
+          disabled={isSubmitting || isCompressing}
+        />
+
+        {/* STATE 1: Empty Drafts (Initial File Picker) */}
+        {drafts.length === 0 ? (
+          <div className="py-6 flex flex-col items-center justify-center gap-4 text-center">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isCompressing}
+              className="flex w-full flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border-strong bg-chalk/50 p-8 text-center transition-colors hover:border-dusty-lilac hover:bg-chalk active:scale-98"
+            >
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-dusty-lilac/15 text-dusty-lilac shadow-xs">
+                {isCompressing ? (
+                  <Loader2 size={24} className="animate-spin" />
+                ) : (
+                  <Camera size={26} />
+                )}
+              </div>
+              <p className="mt-4 text-sm font-bold text-french-navy">
+                {isCompressing
+                  ? "Optimizing photos..."
+                  : "Tap to select photos"}
+              </p>
+              <p className="mt-1 text-xs text-muted max-w-xs">
+                Select one or multiple photos from your camera roll. Everything
+                stays safely in memory until you hit submit.
+              </p>
+            </button>
+
+            {defaultTags.length > 0 && (
+              <div className="flex items-center gap-1.5 text-[11px] text-muted">
+                <Sparkles size={12} className="text-dusty-lilac" />
+                <span>Sticky defaults active ({defaultCategory})</span>
               </div>
             )}
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleImageSelect}
-              accept="image/*"
-              className="hidden"
-            />
           </div>
+        ) : (
+          /* STATE 2: Swipeable Multi-Item Editor */
+          <div className="flex flex-col gap-4 py-4">
+            {/* Top Navigation & Thumbnail Strip */}
+            <div className="flex items-center justify-between border-b border-border-neutral/60 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs font-bold text-french-navy">
+                  Item {activeIndex + 1} of {drafts.length}
+                </span>
+                <span className="rounded-md bg-dusty-lilac/15 px-2 py-0.5 font-mono text-[10px] font-bold text-dusty-lilac">
+                  {currentDraft?.category}
+                </span>
+              </div>
 
-          {/* Title */}
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-french-navy">
-              Item Name <span className="text-dusty-lilac">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              value={title}
-              onChange={(e) => {
-                setTitle(e.target.value);
-                if (formError?.type === "no_title") setFormError(null);
-              }}
-              placeholder="e.g. Linen Summer Dress"
-              className={`mt-1 w-full rounded-xl border bg-chalk px-4 py-2.5 text-sm font-semibold text-midnight-slate focus:border-french-navy focus:outline-none ${
-                formError?.type === "no_title" ? "border-red-400" : "border-border-strong"
-              }`}
-            />
-          </div>
-
-          {/* Category Dropdown (strictly bound to Postgres ENUM values) */}
-          <div>
-            <label
-              htmlFor="category-select"
-              className="text-[11px] font-bold uppercase tracking-wider text-french-navy"
-            >
-              Category Folder <span className="text-dusty-lilac">*</span>
-            </label>
-            <select
-              id="category-select"
-              value={category}
-              onChange={(e) => {
-                const val = e.target.value as ValidEnumCategory;
-                setCategory(val);
-                if (formError?.type === "enum_violation") setFormError(null);
-              }}
-              className="mt-1 w-full rounded-xl border border-border-strong bg-chalk px-4 py-2.5 text-sm font-semibold text-midnight-slate focus:border-french-navy focus:outline-none"
-            >
-              {CATEGORY_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label} — {opt.hint}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Tags */}
-          <div>
-            <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-french-navy">
-              Custom Tags
-            </label>
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="inline-flex items-center gap-1 rounded-md border border-border-neutral bg-chalk px-2.5 py-1 text-xs font-mono font-medium text-french-navy"
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-1 rounded-xl border border-border-neutral bg-chalk px-2.5 py-1 text-xs font-bold text-french-navy hover:bg-border-neutral active:scale-95 transition"
                 >
-                  #{tag}
+                  <Plus size={12} />
+                  <span>Add More</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveDraft(activeIndex)}
+                  className="rounded-xl border border-rose-200 bg-rose-50/70 p-1.5 text-rose-600 hover:bg-rose-100 transition active:scale-95"
+                  title="Remove this draft"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </div>
+
+            {/* Thumbnail Pills Carousel Strip */}
+            {drafts.length > 1 && (
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 hide-scrollbar">
+                {drafts.map((d, idx) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => setActiveIndex(idx)}
+                    className={`relative shrink-0 h-11 w-11 rounded-xl overflow-hidden border-2 transition ${
+                      idx === activeIndex
+                        ? "border-dusty-lilac shadow-xs scale-105"
+                        : "border-border-neutral opacity-60 hover:opacity-100"
+                    }`}
+                  >
+                    <Image
+                      src={d.previewUrl}
+                      alt={`Draft ${idx + 1}`}
+                      fill
+                      unoptimized
+                      className="object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Swipeable Item Card */}
+            <div
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
+              className="relative flex flex-col gap-4 rounded-2xl border border-border-neutral bg-chalk/30 p-4"
+            >
+              {/* Desktop / Prev / Next Chevrons */}
+              {drafts.length > 1 && (
+                <>
                   <button
                     type="button"
-                    onClick={() => removeTag(tag)}
-                    className="ml-0.5 text-muted hover:text-red-600"
+                    disabled={activeIndex === 0}
+                    onClick={() => setActiveIndex(activeIndex - 1)}
+                    className="absolute left-2 top-28 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-midnight-slate/70 text-white shadow-md backdrop-blur-xs transition hover:bg-midnight-slate disabled:opacity-0 pointer-events-auto"
+                    aria-label="Previous garment"
                   >
-                    <X size={12} />
+                    <ChevronLeft size={16} />
                   </button>
-                </span>
-              ))}
-            </div>
-            <input
-              type="text"
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={handleKeyDownTag}
-              placeholder="Type tag and press Enter or comma..."
-              className="w-full rounded-xl border border-border-strong bg-chalk px-4 py-2.5 text-sm font-semibold text-midnight-slate focus:border-french-navy focus:outline-none"
-            />
-          </div>
+                  <button
+                    type="button"
+                    disabled={activeIndex === drafts.length - 1}
+                    onClick={() => setActiveIndex(activeIndex + 1)}
+                    className="absolute right-2 top-28 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-midnight-slate/70 text-white shadow-md backdrop-blur-xs transition hover:bg-midnight-slate disabled:opacity-0 pointer-events-auto"
+                    aria-label="Next garment"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </>
+              )}
 
-          {/* Submit Action with granular step feedback */}
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-french-navy py-3 text-xs font-bold uppercase tracking-wider text-white shadow-md transition hover:bg-french-navy-hover active:scale-[0.99] disabled:opacity-60"
-          >
-            {uploadStep === "compressing" ? (
-              <>
-                <Loader2 size={16} className="animate-spin text-dusty-lilac" /> Compressing photo...
-              </>
-            ) : uploadStep === "uploading_storage" ? (
-              <>
-                <Loader2 size={16} className="animate-spin text-dusty-lilac" /> Uploading to storage...
-              </>
-            ) : uploadStep === "saving_db" ? (
-              <>
-                <Loader2 size={16} className="animate-spin text-dusty-lilac" /> Saving to closet database...
-              </>
-            ) : (
-              <>
-                <Sparkles size={14} className="text-dusty-lilac" /> Save to Closet Database
-              </>
-            )}
-          </button>
-        </form>
+              {/* Image Preview Container */}
+              <div className="relative aspect-4/3 w-full overflow-hidden rounded-xl border border-border-neutral bg-chalk">
+                {currentDraft?.previewUrl && (
+                  <Image
+                    src={currentDraft.previewUrl}
+                    alt={currentDraft.title || "Garment preview"}
+                    fill
+                    unoptimized
+                    className="object-contain"
+                  />
+                )}
+                {currentDraft?.existingImageUrl && (
+                  <span className="absolute bottom-2 left-2 rounded-lg bg-midnight-slate/80 px-2 py-1 font-mono text-[9px] font-bold text-buttercream backdrop-blur-xs">
+                    Existing Photo
+                  </span>
+                )}
+              </div>
+
+              {/* Garment Title Input */}
+              <div className="space-y-1">
+                <label className="font-mono text-xs font-semibold uppercase text-muted">
+                  Item Title <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={currentDraft?.title || ""}
+                  onChange={(e) =>
+                    updateCurrentDraft({ title: e.target.value })
+                  }
+                  placeholder="e.g., Oversized Linen Blazer"
+                  className="w-full rounded-xl border border-border-strong bg-buttercream px-3.5 py-2.5 text-xs font-semibold text-french-navy placeholder:text-muted/60 focus:border-dusty-lilac focus:outline-hidden"
+                  disabled={isSubmitting}
+                />
+              </div>
+
+              {/* Category Selector */}
+              <div className="space-y-1">
+                <label className="font-mono text-xs font-semibold uppercase text-muted">
+                  Category <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={currentDraft?.category || defaultCategory}
+                  onChange={(e) =>
+                    updateCurrentDraft({
+                      category: e.target.value as ValidEnumCategory,
+                    })
+                  }
+                  className="w-full rounded-xl border border-border-strong bg-buttercream px-3.5 py-2.5 text-xs font-semibold text-french-navy focus:border-dusty-lilac focus:outline-hidden"
+                  disabled={isSubmitting}
+                >
+                  {CATEGORY_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label} — {opt.hint}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Tags Input */}
+              <div className="space-y-1">
+                <label className="font-mono text-xs font-semibold uppercase text-muted">
+                  Tags (Press Enter or comma)
+                </label>
+                <input
+                  type="text"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={handleKeyDownTag}
+                  placeholder="e.g., vintage, casual, silk"
+                  className="w-full rounded-xl border border-border-strong bg-buttercream px-3.5 py-2 text-xs font-semibold text-french-navy placeholder:text-muted/60 focus:border-dusty-lilac focus:outline-hidden"
+                  disabled={isSubmitting}
+                />
+                {currentDraft?.tags && currentDraft.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1.5">
+                    {currentDraft.tags.map((t) => (
+                      <span
+                        key={t}
+                        className="inline-flex items-center gap-1 rounded-lg border border-border-neutral bg-buttercream px-2 py-0.5 text-[11px] font-bold text-french-navy"
+                      >
+                        #{t}
+                        <button
+                          type="button"
+                          onClick={() => removeTagFromCurrentDraft(t)}
+                          className="hover:text-rose-600"
+                        >
+                          <X size={10} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Shareable in Circles Toggle */}
+              <label className="flex items-center justify-between rounded-xl border border-border-neutral bg-buttercream p-3 cursor-pointer">
+                <div>
+                  <p className="text-xs font-bold text-french-navy">
+                    Shareable in Circles
+                  </p>
+                  <p className="text-[10px] text-muted">
+                    Allow circle besties to discover and borrow this piece
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={currentDraft?.isSharable ?? true}
+                  onChange={(e) =>
+                    updateCurrentDraft({ isSharable: e.target.checked })
+                  }
+                  className="h-4 w-4 accent-dusty-lilac rounded"
+                  disabled={isSubmitting}
+                />
+              </label>
+            </div>
+
+            {/* Upload All Action Button */}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={handleUploadAll}
+                disabled={isSubmitting}
+                className="w-full flex items-center justify-center gap-2 rounded-2xl bg-french-navy py-3.5 text-xs font-bold uppercase tracking-wider text-white shadow-sm transition hover:bg-french-navy-hover active:scale-95 disabled:opacity-50"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>
+                      {uploadStep === "uploading_storage"
+                        ? `Uploading ${uploadProgress?.current || 1} of ${uploadProgress?.total || drafts.length}...`
+                        : "Saving to closet..."}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Check size={16} />
+                    <span>
+                      Upload All ({drafts.length}{" "}
+                      {drafts.length === 1 ? "Piece" : "Pieces"})
+                    </span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

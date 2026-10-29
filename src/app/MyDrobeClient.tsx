@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -44,7 +44,14 @@ interface MyDrobeClientProps {
 
 export default function MyDrobeClient({ initialItems: items }: MyDrobeClientProps) {
   const [activeCategory, setActiveCategory] = useState<string>("All");
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    const hasDuplicate = Boolean(
+      localStorage.getItem("sharedrobe_duplicate_item")
+    );
+    return params.get("action") === "add_item" || hasDuplicate;
+  });
   const [selectedItemToShare, setSelectedItemToShare] = useState<WardrobeItem | null>(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
@@ -52,8 +59,34 @@ export default function MyDrobeClient({ initialItems: items }: MyDrobeClientProp
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
-  const handleItemAdded = () => {
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("action") === "add_item") {
+        setIsModalOpen(true);
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  const handleModalClose = () => {
     setIsModalOpen(false);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("action")) {
+        url.searchParams.delete("action");
+        window.history.replaceState(
+          {},
+          "",
+          url.pathname + (url.search ? url.search : "")
+        );
+      }
+    }
+  };
+
+  const handleItemAdded = () => {
+    handleModalClose();
     startTransition(() => {
       router.refresh();
     });
@@ -307,7 +340,7 @@ export default function MyDrobeClient({ initialItems: items }: MyDrobeClientProp
       {/* Add Item Modal */}
       <AddItemModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={handleModalClose}
         onSuccess={handleItemAdded}
       />
 

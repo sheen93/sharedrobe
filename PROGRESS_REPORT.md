@@ -2,8 +2,8 @@
 
 > **Document Type:** Multi-Agent System Handoff & System State Blueprint  
 > **Repository:** `sheen93/sharedrobe`  
-> **Last Updated:** October 18, 2026 (Local Time: 04:15 EDT)  
-> **Current Active Branch:** `main` (Sprint 4 Lookbook Builder & Post-Sprint Refinements Complete & Merged)  
+> **Last Updated:** October 29, 2026 (Sprint 5 Complete & Merged to main)  
+> **Current Active Branch:** `main` (Sprint 5 SOS Events, Lightweight PWA & Fatigue Reduction Complete & Merged)  
 > **Active Environment:** Next.js 16.3.5 (App Router, Turbopack) / React 19 / TypeScript 5 / Tailwind CSS v4 / Supabase (@supabase/ssr)
 
 ---
@@ -301,6 +301,40 @@ This document serves as an exhaustive, definitive record of every engineering de
   - Expanded `scripts/test-social-actions-edge-cases.mjs` with Section 8 (7 new lookbook & batch-borrow tests `8A`–`8G`).
   - Total automated tests increased from 47 to 54 passing tests (14 upload + 40 social/items/borrow/drama/lookbooks).
   - 0 ESLint errors, 0 TypeScript errors, Next.js 16 Turbopack build succeeded.
+
+---
+
+### Milestone 10: Sprint 5 Emergency SOS Events, Lightweight PWA & Data Entry Fatigue Reduction (`feat/sprint5-sos-and-pwa`)
+- **Part 1: Database Architecture & SOS Event RLS (`supabase/migrations/20261029000000_sprint5_sos_events.sql`):**
+  - Created ENUMs `sos_request_status` (`'active'`, `'fulfilled'`, `'cancelled'`) and `sos_suggestion_status` (`'suggested'`, `'accepted'`, `'declined'`).
+  - Extended `circle_activity_type` with `'sos_request'` and `'sos_suggestion'`.
+  - Created table `public.sos_requests` (`id`, `requester_id`, `circle_id`, `event_description`, `target_date`, `status`, `created_at`) with indexes on `(circle_id, status)` and `(requester_id)`.
+  - Created table `public.sos_suggestions` (`id`, `sos_id`, `suggester_id`, `item_id`, `status`, `created_at`) with unique pair index `idx_sos_suggestions_unique_item` preventing duplicate suggestions of the same item.
+  - Added anti-recursion `SECURITY DEFINER` STABLE functions `public.can_view_sos(sos_id, user_id)`, `public.is_sos_requester(sos_id, user_id)`, `public.is_sos_suggester(suggestion_id, user_id)`, and updated `public.is_item_shared_with_user(...)` to grant view access to items pitched in SOS suggestions.
+  - Strict RLS: members of approved circles can view and insert SOS requests; circle members who own the item can pitch suggestions; SOS requesters can accept suggestions.
+- **Part 2: Lightweight PWA & Server Actions (`public/manifest.json`, `layout.tsx`, `globals.css`, `actions.ts`, `constants.ts`):**
+  - Created `public/manifest.json` configured for `standalone` display mode, `#FCFBF7` theme color, and `#FCFBF7` background color.
+  - Updated `src/app/layout.tsx` adding Apple meta tags (`apple-mobile-web-app-capable: "yes"`, `apple-mobile-web-app-status-bar-style: "default"`, `apple-touch-icon`) and viewport constraints (`maximumScale: 1`, `userScalable: false`) to disable mobile pinch-zoom rubber-banding.
+  - Updated `src/app/globals.css`: added `overscroll-behavior-y: none;` on `html, body`, applied `@apply select-none touch-manipulation;` to prevent rubber-banding while keeping input elements `select-auto`.
+  - Implemented async Server Actions in `src/app/sharedrobe/actions.ts`:
+    - `createSosRequest(circleId, eventDescription, targetDate)`: Validates description (3–500 chars) and target date, inserts `sos_requests`, and logs `'sos_request'` into `circle_activity`.
+    - `suggestItemForSos(sosId, itemId)`: Validates item ownership and 'Available' status, inserts `sos_suggestions`, and logs `'sos_suggestion'` into `circle_activity`.
+    - `acceptSosSuggestion(suggestionId, durationIntent)`: Requester-only authorization, transitions suggestion to `'accepted'`, sets SOS request to `'fulfilled'`, auto-generates standard `borrow_requests` row, and dispatches transactional email to the item owner.
+- **Part 3: Data Entry Fatigue Reduction (`ItemDetailClient.tsx`, `MyDrobeClient.tsx`, `AddItemModal.tsx`):**
+  - **Duplicate Item (`ItemDetailClient.tsx`):** Added a "Duplicate Item" action for owners with a confirmation prompt: *"Do you want to upload a duplicate photo?"*. Answering **Yes** passes the existing image URL to the upload form; answering **No** opens the upload modal with prefilled category, tags, and is_sharable, requiring a new photo.
+  - **Bulk Upload with In-Memory State (`src/components/AddItemModal.tsx`):** Converted modal to accept multiple files via drag-and-drop or file picker. Drafts are held in local React state using `URL.createObjectURL()`, rendered in a swipeable draft carousel with independent titles and categories, revoking object URLs upon disposal to prevent memory leaks. Zero network requests or storage writes occur until the user taps **"Upload All"**.
+  - **Sticky Defaults (`AddItemModal.tsx`):** On successful upload, active category and tags are persisted to `localStorage` (`sharedrobe_sticky_upload_category`, `sharedrobe_sticky_upload_tags`), initializing future uploads automatically.
+- **Part 4: The SOS Event UI (`src/app/sharedrobe/[id]/page.tsx`, `CircleDetailClient.tsx`):**
+  - **SOS Banner:** Added **`Ask the Group (SOS)`** CTA button in the Circle Header and an emergency alert badge when active SOS events exist in the circle.
+  - **Active SOS Cards:** Rendered an **`🚨 Urgent Requests`** card section directly above the Drama Feed in the Activity tab, showing the requester, target date, event description, and suggestions list with 1-tap **`Accept`** action.
+  - **Suggest Item Bottom Drawer:** Added **`Suggest Item`** button opening a bottom drawer populated with the active user's `Available` items. Tapping an item submits `suggestItemForSos` with immediate optimistic feedback and duplicate suggestion protection.
+- **Part 5: Post-Sprint 5 UI Refinements & Notification Badge Alignment:**
+  1. **Circle Header Action Grid (`CircleDetailClient.tsx`):** Redesigned the header action area from a cramped flex row into a full-width 2-column grid (`grid grid-cols-2 gap-2 mt-3.5 border-t pt-3`). Sized both **`Ask the Group (SOS)`** and **`+ Build Lookbook`** with equal `h-9` height, centered alignment, and `truncate` single-line styling, resolving the multi-line text wrap and card container overflow.
+  2. **Unread Activity & Drama Notification Count (`CircleDetailClient.tsx`):** Replaced the lifetime total activity count (`{activities.length}`) with a visit-aware unread notification counter. Persists the last viewed timestamp in `localStorage` under `sharedrobe_last_seen_activity_${circle.id}` (initialized to `Date.now()` on first visit). Automatically resets unread count to 0 when visiting the Activity tab (`markActivityFeedSeen`), and renders the badge conditionally only when unread notifications exist (`unreadActivityCount > 0`).
+- **QA Verification & Edge Case Matrix:**
+  - Expanded `scripts/test-social-actions-edge-cases.mjs` with Section 9 and Section 10 (14 new tests `9A`–`9G` and `10A`–`10G`).
+  - Total automated tests increased from 54 to 68 passing tests (14 upload + 54 social/items/borrow/lookbooks/SOS/PWA/notifications).
+  - 0 ESLint errors, 0 TypeScript errors, Next.js 16 Turbopack production build succeeded across all routes.
 
 ---
 
@@ -907,7 +941,7 @@ Before writing any new code, execute the full validation suite to verify that th
 ```bash
 npm run lint         # Must report 0 errors, 0 warnings
 npm run typecheck    # Must report 0 TypeScript errors
-npm test             # Must report 54/54 passing tests
+npm test             # Must report 68/68 passing tests
 npm run build        # Must compile all routes successfully with Turbopack
 ```
 

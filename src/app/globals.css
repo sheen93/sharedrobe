@@ -41,6 +41,15 @@ body {
   color: var(--foreground);
   margin: 0;
   padding: 0;
+  overscroll-behavior-y: none;
+  @apply select-none touch-manipulation;
+}
+
+input,
+textarea,
+select,
+[contenteditable="true"] {
+  @apply select-auto;
 }
 
 /* Hide scrollbars for clean mobile horizontal scrolling (category pills) */

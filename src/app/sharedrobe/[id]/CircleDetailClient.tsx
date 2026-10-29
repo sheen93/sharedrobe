@@ -39,11 +39,49 @@ import {
   leaveCircle,
   resolveBorrowDrama,
   cancelBorrowRequest,
+  createSosRequest,
+  suggestItemForSos,
+  acceptSosSuggestion,
 } from "@/app/sharedrobe/actions";
 import { castOutfitVote } from "@/app/outfits/actions";
 import type { OutfitVoteType } from "@/app/outfits/constants";
 import type { CircleActivityType } from "@/app/sharedrobe/constants";
 import { cn } from "@/utils/cn";
+
+export interface SosSuggestionItem {
+  id: string;
+  sos_id: string;
+  suggester_id: string;
+  suggesterName: string;
+  item_id: string;
+  itemTitle: string;
+  itemImageUrl: string;
+  itemCategory: string;
+  itemStatus: string;
+  itemOwnerId: string;
+  status: "suggested" | "accepted" | "declined";
+  created_at: string;
+}
+
+export interface SosRequestItem {
+  id: string;
+  requester_id: string;
+  requesterName: string;
+  circle_id: string;
+  event_description: string;
+  target_date: string;
+  status: "active" | "fulfilled" | "cancelled";
+  created_at: string;
+  suggestions: SosSuggestionItem[];
+}
+
+export interface MyAvailableGarment {
+  id: string;
+  title: string;
+  category: string;
+  image_url: string;
+  status: string;
+}
 
 export interface CircleMemberProfile {
   membershipId: string;
@@ -125,6 +163,8 @@ interface CircleDetailClientProps {
   items: CircleGarmentItem[];
   pendingBorrowRequests: CircleBorrowRequestItem[];
   activities: CircleActivityItem[];
+  sosRequests?: SosRequestItem[];
+  myAvailableItems?: MyAvailableGarment[];
 }
 
 function formatRelativeTime(isoDate: string): string {
@@ -148,8 +188,26 @@ export default function CircleDetailClient({
   items,
   pendingBorrowRequests,
   activities,
+  sosRequests = [],
+  myAvailableItems = [],
 }: CircleDetailClientProps) {
   const router = useRouter();
+
+  // SOS state
+  const [isSosModalOpen, setIsSosModalOpen] = useState(false);
+  const [sosEventDescription, setSosEventDescription] = useState("");
+  const [sosTargetDate, setSosTargetDate] = useState("");
+  const [isSubmittingSos, setIsSubmittingSos] = useState(false);
+
+  // Suggest Item State
+  const [selectedSosForSuggest, setSelectedSosForSuggest] =
+    useState<SosRequestItem | null>(null);
+  const [isSuggestingItemId, setIsSuggestingItemId] = useState<string | null>(
+    null
+  );
+  const [isAcceptingSuggestion, setIsAcceptingSuggestion] = useState<
+    string | null
+  >(null);
 
   // Circle View Tab state ('closet' | 'activity')
   const [activeViewTab, setActiveViewTab] = useState<"closet" | "activity">(
@@ -202,15 +260,55 @@ export default function CircleDetailClient({
     }
   };
 
+  // Track last visited timestamp for the Activity & Drama feed so the count reflects only new notifications
+  const activityStorageKey = `sharedrobe_last_seen_activity_${circle.id}`;
+
+  const [lastSeenActivityTime, setLastSeenActivityTime] = useState<number>(() => {
+    if (typeof window === "undefined") return Date.now();
+    try {
+      const stored = window.localStorage.getItem(activityStorageKey);
+      if (stored) {
+        const parsed = parseInt(stored, 10);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+      // On initial visit to this circle, initialize to now so historical activities aren't counted as new
+      const now = Date.now();
+      window.localStorage.setItem(activityStorageKey, String(now));
+      return now;
+    } catch {
+      return Date.now();
+    }
+  });
+
+  const markActivityFeedSeen = () => {
+    const now = Date.now();
+    setLastSeenActivityTime(now);
+    try {
+      window.localStorage.setItem(activityStorageKey, String(now));
+    } catch {
+      // Ignore storage errors
+    }
+  };
+
   const handleSwitchViewTab = (tab: "closet" | "activity") => {
     if (tab === "activity") {
       markDramaFeedSeen();
+      markActivityFeedSeen();
     }
     setActiveViewTab(tab);
   };
 
   const hasUnseenPublicNudge =
     publicNudgeCount > 0 && seenDramaSignature !== publicNudgeSignature;
+
+  // Count unread activities created after the user's last visit to the activity feed
+  const unreadActivityCount =
+    activeViewTab === "activity"
+      ? 0
+      : activities.filter((act) => {
+          const actTime = new Date(act.created_at).getTime();
+          return !isNaN(actTime) && actTime > lastSeenActivityTime;
+        }).length;
 
   // Feedback banner
   const [feedback, setFeedback] = useState<{
@@ -226,6 +324,90 @@ export default function CircleDetailClient({
     setTimeout(() => {
       setFeedback((prev) => (prev?.text === text ? null : prev));
     }, 4500);
+  };
+
+  const handleCreateSos = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (sosEventDescription.trim().length < 3) {
+      showFeedback(
+        "error",
+        "Please provide a valid event description (at least 3 characters)."
+      );
+      return;
+    }
+    if (!sosTargetDate) {
+      showFeedback("error", "Please pick an event date.");
+      return;
+    }
+    setIsSubmittingSos(true);
+    try {
+      const res = await createSosRequest(
+        circle.id,
+        sosEventDescription,
+        sosTargetDate
+      );
+      if (res.success) {
+        setIsSosModalOpen(false);
+        setSosEventDescription("");
+        setSosTargetDate("");
+        showFeedback("success", res.message);
+        router.refresh();
+      } else {
+        showFeedback("error", res.error);
+      }
+    } catch {
+      showFeedback("error", "Failed to submit SOS request.");
+    } finally {
+      setIsSubmittingSos(false);
+    }
+  };
+
+  const handleSuggestItem = async (itemId: string, itemTitle?: string) => {
+    if (!selectedSosForSuggest) return;
+    setIsSuggestingItemId(itemId);
+    try {
+      const res = await suggestItemForSos(selectedSosForSuggest.id, itemId);
+      if (res.success) {
+        setSelectedSosForSuggest(null);
+        showFeedback(
+          "success",
+          res.message || (itemTitle ? `Suggested "${itemTitle}"!` : "Garment suggested!")
+        );
+        router.refresh();
+      } else {
+        showFeedback("error", res.error);
+      }
+    } catch {
+      showFeedback("error", "Failed to suggest garment.");
+    } finally {
+      setIsSuggestingItemId(null);
+    }
+  };
+
+  const handleAcceptSuggestion = async (
+    suggestionId: string,
+    itemTitle?: string
+  ) => {
+    setIsAcceptingSuggestion(suggestionId);
+    try {
+      const res = await acceptSosSuggestion(
+        suggestionId,
+        "Just for the weekend"
+      );
+      if (res.success) {
+        showFeedback(
+          "success",
+          res.message || (itemTitle ? `Accepted "${itemTitle}"!` : "Suggestion accepted!")
+        );
+        router.refresh();
+      } else {
+        showFeedback("error", res.error);
+      }
+    } catch {
+      showFeedback("error", "Failed to accept garment suggestion.");
+    } finally {
+      setIsAcceptingSuggestion(null);
+    }
   };
 
   // Filtered garments by selected member drawer
@@ -448,19 +630,53 @@ export default function CircleDetailClient({
               </div>
             </div>
 
-            <div className="mt-3 flex items-center justify-between gap-2 border-t border-border-neutral/80 pt-3">
-              <span className="text-[11px] font-medium text-graphite">
-                Want to style a look for circle polling?
-              </span>
-              <Link
-                href={`/outfits/builder?circleId=${circle.id}&from=/sharedrobe/${circle.id}`}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-dusty-lilac px-3 py-1.5 text-xs font-bold text-white shadow-2xs transition hover:opacity-95 active:scale-95"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                <span>+ Build Lookbook</span>
-              </Link>
+            <div className="mt-3.5 border-t border-border-neutral/80 pt-3">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsSosModalOpen(true)}
+                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-rose-300 bg-rose-50 px-2.5 text-[11px] sm:text-xs font-bold text-rose-700 shadow-2xs transition hover:bg-rose-100 active:scale-95"
+                >
+                  <Siren className="h-3.5 w-3.5 shrink-0 text-rose-600 animate-pulse" />
+                  <span className="truncate">Ask the Group (SOS)</span>
+                </button>
+
+                <Link
+                  href={`/outfits/builder?circleId=${circle.id}&from=/sharedrobe/${circle.id}`}
+                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-dusty-lilac px-2.5 text-[11px] sm:text-xs font-bold text-white shadow-2xs transition hover:opacity-95 active:scale-95"
+                >
+                  <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">+ Build Lookbook</span>
+                </Link>
+              </div>
             </div>
           </div>
+
+          {/* Mini SOS Alert Teaser if there are active SOS requests */}
+          {sosRequests.length > 0 && (
+            <button
+              type="button"
+              onClick={() => handleSwitchViewTab("activity")}
+              className="mt-3 flex w-full items-center justify-between gap-2.5 rounded-2xl border border-rose-200 bg-rose-50/70 p-3 text-left transition hover:bg-rose-100/70"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-rose-600 text-white shadow-2xs">
+                  <Siren className="h-4 w-4 animate-pulse" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs font-extrabold text-french-navy truncate">
+                    🚨 {sosRequests.length} Active {sosRequests.length === 1 ? "Outfit SOS" : "Outfit SOS Events"}!
+                  </p>
+                  <p className="text-[10px] text-muted truncate">
+                    &ldquo;{sosRequests[0].event_description}&rdquo; — tap to help!
+                  </p>
+                </div>
+              </div>
+              <span className="shrink-0 rounded-xl bg-rose-600 px-2.5 py-1 text-[10px] font-bold text-white shadow-2xs">
+                Urgent Requests →
+              </span>
+            </button>
+          )}
 
           {/* Feedback Banner */}
           {feedback && (
@@ -530,18 +746,21 @@ export default function CircleDetailClient({
                 <Activity className="h-3.5 w-3.5" />
               )}
               <span>Activity &amp; Drama</span>
-              <span
-                className={cn(
-                  "rounded px-1.5 py-0.2 font-mono text-[9px] font-bold",
-                  hasUnseenPublicNudge
-                    ? "bg-dusty-lilac text-white"
-                    : activeViewTab === "activity"
-                    ? "bg-white/20 text-white"
-                    : "bg-buttercream text-french-navy"
-                )}
-              >
-                {activities.length}
-              </span>
+              {unreadActivityCount > 0 && (
+                <span
+                  className={cn(
+                    "rounded px-1.5 py-0.2 font-mono text-[9px] font-bold animate-in fade-in zoom-in-95 duration-150",
+                    hasUnseenPublicNudge
+                      ? "bg-rose-500 text-white shadow-2xs animate-pulse"
+                      : activeViewTab === "activity"
+                      ? "bg-white/20 text-white"
+                      : "bg-dusty-lilac text-white shadow-2xs"
+                  )}
+                  title={`${unreadActivityCount} new notification${unreadActivityCount > 1 ? "s" : ""} since last visit`}
+                >
+                  {unreadActivityCount > 99 ? "99+" : unreadActivityCount}
+                </span>
+              )}
             </button>
           </div>
 
@@ -1013,8 +1232,183 @@ export default function CircleDetailClient({
           {activeViewTab === "activity" && (
             <section
               aria-label="Circle Activity and Drama Feed"
-              className="mt-4 space-y-3"
+              className="mt-4 space-y-4"
             >
+              {/* URGENT SOS REQUESTS SECTION */}
+              {sosRequests.length > 0 && (
+                <div className="space-y-2.5 pb-2 border-b border-border-neutral">
+                  <div className="flex items-center justify-between px-1">
+                    <div className="flex items-center gap-1.5">
+                      <Siren className="h-4 w-4 text-rose-600 animate-pulse" />
+                      <h2 className="font-mono text-[10px] font-bold uppercase tracking-wider text-rose-700">
+                        URGENT REQUESTS ({sosRequests.length})
+                      </h2>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsSosModalOpen(true)}
+                      className="font-mono text-[10px] font-bold text-rose-600 hover:text-rose-800 underline"
+                    >
+                      + Ask SOS
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {sosRequests.map((sos) => {
+                      const isMySos = sos.requester_id === currentUserId;
+                      const hasAccepted = sos.suggestions.some(
+                        (s) => s.status === "accepted"
+                      );
+
+                      return (
+                        <div
+                          key={sos.id}
+                          className="flex flex-col gap-3 rounded-2xl border border-rose-200 bg-rose-50/40 p-4 shadow-2xs"
+                        >
+                          {/* Header */}
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2.5">
+                              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-100 font-mono text-xs font-bold text-rose-700">
+                                {sos.requesterName.slice(0, 2).toUpperCase()}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-bold text-french-navy">
+                                    {isMySos ? "You" : sos.requesterName}
+                                  </span>
+                                  <span className="rounded-md bg-rose-100 px-1.5 py-0.2 font-mono text-[9px] font-extrabold uppercase text-rose-700">
+                                    SOS Event
+                                  </span>
+                                </div>
+                                <p className="font-mono text-[10px] text-muted">
+                                  {formatRelativeTime(sos.created_at)}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1 rounded-xl border border-rose-200 bg-white/90 px-2 py-1 font-mono text-[10px] font-bold text-rose-700 shadow-2xs">
+                              <Clock size={11} className="text-rose-500" />
+                              <span>Needed: {sos.target_date}</span>
+                            </div>
+                          </div>
+
+                          {/* Event Description */}
+                          <div className="rounded-xl border border-rose-100 bg-white/80 p-3">
+                            <p className="text-xs font-semibold text-midnight-slate leading-relaxed">
+                              &ldquo;{sos.event_description}&rdquo;
+                            </p>
+                          </div>
+
+                          {/* Suggestions Received */}
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted">
+                                Suggestions ({sos.suggestions.length})
+                              </span>
+                              {isMySos &&
+                                sos.suggestions.length > 0 &&
+                                !hasAccepted && (
+                                  <span className="text-[10px] font-semibold text-dusty-lilac">
+                                    Accept &amp; auto-borrow
+                                  </span>
+                                )}
+                            </div>
+
+                            {sos.suggestions.length === 0 ? (
+                              <p className="text-[11px] text-muted italic">
+                                No suggestions yet — help a bestie out!
+                              </p>
+                            ) : (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {sos.suggestions.map((sug) => {
+                                  const isAccepted = sug.status === "accepted";
+                                  return (
+                                    <div
+                                      key={sug.id}
+                                      className={cn(
+                                        "flex items-center gap-2.5 rounded-xl border p-2 bg-white transition",
+                                        isAccepted
+                                          ? "border-emerald-300 bg-emerald-50/50"
+                                          : "border-border-neutral"
+                                      )}
+                                    >
+                                      <div className="relative h-12 w-12 shrink-0 rounded-lg overflow-hidden border border-border-neutral bg-chalk">
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img
+                                          src={sug.itemImageUrl}
+                                          alt={sug.itemTitle}
+                                          className="h-full w-full object-cover"
+                                        />
+                                      </div>
+                                      <div className="min-w-0 flex-1">
+                                        <p className="text-xs font-bold text-french-navy truncate">
+                                          {sug.itemTitle}
+                                        </p>
+                                        <p className="font-mono text-[10px] text-muted truncate">
+                                          From{" "}
+                                          {sug.suggester_id === currentUserId
+                                            ? "You"
+                                            : sug.suggesterName}
+                                        </p>
+                                        {isAccepted && (
+                                          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-600">
+                                            <Check size={10} /> Accepted
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      {isMySos && !hasAccepted && (
+                                        <button
+                                          type="button"
+                                          disabled={
+                                            isAcceptingSuggestion === sug.id
+                                          }
+                                          onClick={() =>
+                                            handleAcceptSuggestion(
+                                              sug.id,
+                                              sug.itemTitle
+                                            )
+                                          }
+                                          className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-french-navy px-2.5 py-1.5 text-[10px] font-bold text-white shadow-2xs hover:bg-french-navy-hover active:scale-95 transition disabled:opacity-50"
+                                        >
+                                          {isAcceptingSuggestion === sug.id ? (
+                                            <Loader2
+                                              size={11}
+                                              className="animate-spin"
+                                            />
+                                          ) : (
+                                            <Check size={11} />
+                                          )}
+                                          <span>Accept</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Peer Suggest Button */}
+                          {!isMySos && (
+                            <div className="pt-1 flex items-center justify-end">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedSosForSuggest(sos)}
+                                className="inline-flex items-center gap-1.5 rounded-xl bg-french-navy px-3.5 py-2 text-xs font-bold text-white shadow-2xs hover:bg-french-navy-hover active:scale-95 transition"
+                              >
+                                <Sparkles size={13} className="text-dusty-lilac" />
+                                <span>Suggest Item</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-1.5">
                   <Megaphone className="h-3.5 w-3.5 text-dusty-lilac" />
@@ -1525,6 +1919,237 @@ export default function CircleDetailClient({
           router.refresh();
         }}
       />
+
+      {/* Ask the Group (SOS) Modal */}
+      {isSosModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-midnight-slate/60 p-4 backdrop-blur-xs animate-in fade-in duration-150"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="sos-modal-title"
+        >
+          <div className="w-full max-w-sm rounded-3xl border border-border-neutral bg-buttercream p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-rose-100 text-rose-600">
+                  <Siren className="h-4 w-4 animate-pulse" />
+                </span>
+                <div>
+                  <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-rose-600">
+                    EMERGENCY OUTFIT REQUEST
+                  </p>
+                  <h2
+                    id="sos-modal-title"
+                    className="text-base font-extrabold text-midnight-slate"
+                  >
+                    Ask the Group (SOS)
+                  </h2>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSosModalOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-border-neutral bg-chalk text-muted transition hover:text-midnight-slate"
+                aria-label="Close SOS modal"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="mt-2 text-xs text-muted">
+              Broadcast an urgent outfit need to your circle besties. Anyone in the circle can pitch garments from their closet to help you out!
+            </p>
+
+            <form onSubmit={handleCreateSos} className="mt-4 space-y-3.5">
+              <div>
+                <label className="block font-mono text-[10px] font-bold uppercase text-midnight-slate">
+                  What do you need / what&apos;s the event?
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={sosEventDescription}
+                  onChange={(e) => setSosEventDescription(e.target.value)}
+                  placeholder="e.g. Wedding guest outfit this Saturday! Looking for a jewel-toned slip dress or chic jumpsuit size S/M."
+                  className="mt-1 w-full rounded-xl border border-border-strong bg-chalk p-2.5 text-xs text-midnight-slate placeholder:text-muted focus:border-rose-500 focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block font-mono text-[10px] font-bold uppercase text-midnight-slate">
+                  Target Date (When do you need it by?)
+                </label>
+                <div className="relative mt-1">
+                  <input
+                    type="date"
+                    required
+                    value={sosTargetDate}
+                    min={new Date().toISOString().split("T")[0]}
+                    onChange={(e) => setSosTargetDate(e.target.value)}
+                    className="w-full rounded-xl border border-border-strong bg-chalk px-3 py-2 text-xs font-semibold text-midnight-slate focus:border-rose-500 focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-border-neutral">
+                <button
+                  type="button"
+                  onClick={() => setIsSosModalOpen(false)}
+                  className="rounded-xl border border-border-neutral bg-chalk px-3.5 py-2 text-xs font-bold text-midnight-slate transition hover:border-french-navy"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={
+                    isSubmittingSos ||
+                    sosEventDescription.trim().length < 3 ||
+                    !sosTargetDate
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-2xs transition hover:bg-rose-700 active:scale-95 disabled:opacity-50"
+                >
+                  {isSubmittingSos ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Siren className="h-3.5 w-3.5" />
+                  )}
+                  <span>Broadcast SOS</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Suggest Item Bottom Drawer */}
+      {selectedSosForSuggest && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-midnight-slate/60 backdrop-blur-xs p-0 sm:items-center sm:p-4 animate-in fade-in duration-150"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="suggest-item-drawer-title"
+        >
+          <div className="flex max-h-[85vh] w-full max-w-md flex-col rounded-t-[32px] sm:rounded-[32px] border border-border-neutral bg-buttercream p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-2 border-b border-border-neutral pb-3">
+              <div>
+                <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-dusty-lilac">
+                  HELP A BESTIE // SUGGEST ITEM
+                </p>
+                <h2
+                  id="suggest-item-drawer-title"
+                  className="mt-0.5 text-base font-extrabold text-midnight-slate"
+                >
+                  Suggest for {selectedSosForSuggest.requesterName}
+                </h2>
+                <p className="mt-1 line-clamp-2 text-xs text-muted">
+                  &ldquo;{selectedSosForSuggest.event_description}&rdquo;
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedSosForSuggest(null)}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border-neutral bg-chalk text-muted transition hover:text-midnight-slate"
+                aria-label="Close drawer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-3 pr-1">
+              {myAvailableItems.length === 0 ? (
+                <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border-strong bg-chalk p-6 text-center">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-buttercream text-dusty-lilac">
+                    <Shirt className="h-5 w-5" />
+                  </div>
+                  <h3 className="mt-2 text-xs font-bold text-midnight-slate">
+                    No Available Items in Your Closet
+                  </h3>
+                  <p className="mt-1 text-[11px] text-muted">
+                    Only your garments currently marked &ldquo;Available&rdquo; can be suggested.
+                  </p>
+                  <Link
+                    href="/?action=add_item"
+                    className="mt-3 inline-flex items-center gap-1 rounded-xl bg-french-navy px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-french-navy-hover transition"
+                  >
+                    + Add New Item
+                  </Link>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2.5">
+                  {myAvailableItems.map((garment) => {
+                    const alreadySuggested = selectedSosForSuggest.suggestions.some(
+                      (s) => s.item_id === garment.id
+                    );
+                    const isSuggesting = isSuggestingItemId === garment.id;
+
+                    return (
+                      <div
+                        key={garment.id}
+                        className={cn(
+                          "flex flex-col overflow-hidden rounded-2xl border bg-chalk transition",
+                          alreadySuggested
+                            ? "border-emerald-300 opacity-60"
+                            : "border-border-neutral hover:border-french-navy hover:shadow-2xs"
+                        )}
+                      >
+                        <div className="relative aspect-square w-full overflow-hidden bg-buttercream">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={garment.image_url}
+                            alt={garment.title}
+                            className="h-full w-full object-cover"
+                          />
+                          <span className="absolute top-1.5 left-1.5 rounded-md bg-white/90 px-1.5 py-0.5 font-mono text-[9px] font-bold text-french-navy shadow-2xs">
+                            {garment.category}
+                          </span>
+                        </div>
+                        <div className="flex flex-1 flex-col justify-between p-2.5">
+                          <p className="truncate text-xs font-bold text-midnight-slate">
+                            {garment.title}
+                          </p>
+                          <div className="mt-2">
+                            {alreadySuggested ? (
+                              <span className="inline-flex w-full items-center justify-center gap-1 rounded-lg bg-emerald-50 py-1.5 text-[10px] font-bold text-emerald-700">
+                                <Check size={11} /> Suggested
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={isSuggesting || isSuggestingItemId !== null}
+                                onClick={() =>
+                                  handleSuggestItem(garment.id, garment.title)
+                                }
+                                className="inline-flex w-full items-center justify-center gap-1 rounded-lg bg-french-navy py-1.5 text-[10px] font-bold text-white shadow-2xs transition hover:bg-french-navy-hover active:scale-95 disabled:opacity-50"
+                              >
+                                {isSuggesting ? (
+                                  <Loader2 size={11} className="animate-spin" />
+                                ) : (
+                                  <Sparkles size={11} className="text-dusty-lilac" />
+                                )}
+                                <span>Pitch Item</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-border-neutral pt-3">
+              <button
+                type="button"
+                onClick={() => setSelectedSosForSuggest(null)}
+                className="w-full rounded-xl border border-border-neutral bg-chalk py-2 text-xs font-bold text-midnight-slate transition hover:border-french-navy"
+              >
+                Close Drawer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

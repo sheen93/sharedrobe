@@ -21,9 +21,27 @@ export const CIRCLE_ACTIVITY_TYPES = [
   "borrowed_item",
   "public_nudge",
   "shared_outfit",
+  "sos_request",
+  "sos_suggestion",
 ] as const;
 
 export type CircleActivityType = (typeof CIRCLE_ACTIVITY_TYPES)[number];
+
+export const SOS_REQUEST_STATUSES = [
+  "active",
+  "fulfilled",
+  "cancelled",
+] as const;
+
+export type SosRequestStatus = (typeof SOS_REQUEST_STATUSES)[number];
+
+export const SOS_SUGGESTION_STATUSES = [
+  "suggested",
+  "accepted",
+  "declined",
+] as const;
+
+export type SosSuggestionStatus = (typeof SOS_SUGGESTION_STATUSES)[number];
 
 export const NUDGE_RETURN_TYPES = ["private", "public"] as const;
 export type NudgeReturnType = (typeof NUDGE_RETURN_TYPES)[number];
@@ -62,4 +80,36 @@ export function formatPublicNudgeMessage(
     ? ` (${ownerName.trim()} is officially calling you out 👀)`
     : "";
   return `🚨 Targeting ${safeBorrower}, time to give "${safeItem}" back!${ownerClause}`;
+}
+
+export function isValidSosDescription(desc: unknown): desc is string {
+  if (typeof desc !== "string") return false;
+  const trimmed = desc.trim();
+  return trimmed.length >= 3 && trimmed.length <= 500;
+}
+
+export function isValidSosTargetDate(dateStr: unknown): dateStr is string {
+  if (typeof dateStr !== "string") return false;
+  const trimmed = dateStr.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return false;
+  const parsed = new Date(trimmed);
+  return !isNaN(parsed.getTime());
+}
+
+export function formatSosRequestActivityMessage(
+  requesterName: string,
+  eventDescription: string
+): string {
+  const safeRequester = requesterName.trim() || "A circle bestie";
+  const safeDesc = eventDescription.trim();
+  return `🚨 SOS Alert: ${safeRequester} needs an outfit for "${safeDesc}"!`;
+}
+
+export function formatSosSuggestionActivityMessage(
+  suggesterName: string,
+  itemTitle: string
+): string {
+  const safeSuggester = suggesterName.trim() || "A circle bestie";
+  const safeItem = itemTitle.trim() || "a garment";
+  return `✨ ${safeSuggester} suggested "${safeItem}" for the SOS request!`;
 }

@@ -6,12 +6,60 @@ import CircleDetailClient, {
   type CircleGarmentItem,
   type CircleBorrowRequestItem,
   type CircleActivityItem,
+  type SosRequestItem,
+  type MyAvailableGarment,
 } from "./CircleDetailClient";
 
 export const dynamic = "force-dynamic";
 
 interface CircleDetailPageProps {
   params: Promise<{ id: string }>;
+}
+
+interface DbSosSuggestionRow {
+  id: string;
+  sos_id: string;
+  suggester_id: string;
+  item_id: string;
+  status: "suggested" | "accepted" | "declined";
+  created_at: string;
+  suggester: {
+    id: string;
+    full_name: string | null;
+    email: string;
+  } | null;
+  item: {
+    id: string;
+    title: string;
+    category: string;
+    image_url: string;
+    status: string | null;
+    owner_id: string;
+  } | null;
+}
+
+interface DbSosRequestRow {
+  id: string;
+  requester_id: string;
+  circle_id: string;
+  event_description: string;
+  target_date: string;
+  status: "active" | "fulfilled" | "cancelled";
+  created_at: string;
+  requester: {
+    id: string;
+    full_name: string | null;
+    email: string;
+  } | null;
+  sos_suggestions: DbSosSuggestionRow[] | null;
+}
+
+interface DbMyAvailableItemRow {
+  id: string;
+  title: string;
+  category: string;
+  image_url: string;
+  status: string | null;
 }
 
 interface DbMemberRow {
@@ -145,13 +193,15 @@ export default async function CircleDetailPage({
     redirect("/sharedrobe");
   }
 
-  // 2. Fetch approved circle members, shared items, pending borrow requests, circle_activity, and circle_public outfits in parallel
+  // 2. Fetch approved circle members, shared items, pending borrow requests, circle_activity, circle_public outfits, active sos_requests, and user available items in parallel
   const [
     { data: memberRowsData, error: memberErr },
     { data: circleItemsData, error: circleItemsErr },
     { data: borrowRequestsData, error: borrowRequestsErr },
     { data: activityRowsData, error: activityErr },
     { data: circleOutfitsData, error: outfitsErr },
+    { data: sosRequestsData, error: sosRequestsErr },
+    { data: myAvailableItemsData, error: myAvailableItemsErr },
   ] = await Promise.all([
     supabase
       .from("circle_members")
@@ -276,6 +326,52 @@ export default async function CircleDetailPage({
       .eq("circle_id", circleId)
       .eq("visibility", "circle_public")
       .order("created_at", { ascending: false }),
+    supabase
+      .from("sos_requests")
+      .select(`
+        id,
+        requester_id,
+        circle_id,
+        event_description,
+        target_date,
+        status,
+        created_at,
+        requester:requester_id (
+          id,
+          full_name,
+          email
+        ),
+        sos_suggestions (
+          id,
+          sos_id,
+          suggester_id,
+          item_id,
+          status,
+          created_at,
+          suggester:suggester_id (
+            id,
+            full_name,
+            email
+          ),
+          item:item_id (
+            id,
+            title,
+            category,
+            image_url,
+            status,
+            owner_id
+          )
+        )
+      `)
+      .eq("circle_id", circleId)
+      .eq("status", "active")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("items")
+      .select("id, title, category, image_url, status")
+      .eq("owner_id", user.id)
+      .eq("status", "Available")
+      .order("created_at", { ascending: false }),
   ]);
 
   if (memberErr) {
@@ -292,6 +388,12 @@ export default async function CircleDetailPage({
   }
   if (outfitsErr) {
     console.error("[CircleDetailPage] Error fetching circle outfits:", outfitsErr);
+  }
+  if (sosRequestsErr) {
+    console.error("[CircleDetailPage] Error fetching sos_requests:", sosRequestsErr);
+  }
+  if (myAvailableItemsErr) {
+    console.error("[CircleDetailPage] Error fetching my available items:", myAvailableItemsErr);
   }
 
   // Format members list (also build a profile lookup map for item owners)
@@ -491,6 +593,69 @@ export default async function CircleDetailPage({
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
 
+  // Format SOS Requests
+  const rawSosRequests = (sosRequestsData as unknown as DbSosRequestRow[]) || [];
+  const sosRequests: SosRequestItem[] = rawSosRequests.map((sos) => {
+    const requesterName =
+      sos.requester?.full_name ||
+      profileNameMap.get(sos.requester_id)?.fullName ||
+      sos.requester?.email?.split("@")[0] ||
+      "Circle Bestie";
+
+    const suggestions: SosRequestItem["suggestions"] = (
+      sos.sos_suggestions || []
+    )
+      .filter((sug) => Boolean(sug.item))
+      .map((sug) => {
+        const item = sug.item!;
+        const suggesterName =
+          sug.suggester?.full_name ||
+          profileNameMap.get(sug.suggester_id)?.fullName ||
+          sug.suggester?.email?.split("@")[0] ||
+          "Circle Member";
+
+        return {
+          id: sug.id,
+          sos_id: sug.sos_id,
+          suggester_id: sug.suggester_id,
+          suggesterName,
+          item_id: sug.item_id,
+          itemTitle: item.title,
+          itemImageUrl: item.image_url,
+          itemCategory: item.category,
+          itemStatus: item.status || "Available",
+          itemOwnerId: item.owner_id,
+          status: sug.status,
+          created_at: sug.created_at,
+        };
+      });
+
+    return {
+      id: sos.id,
+      requester_id: sos.requester_id,
+      requesterName,
+      circle_id: sos.circle_id,
+      event_description: sos.event_description,
+      target_date: sos.target_date,
+      status: sos.status,
+      created_at: sos.created_at,
+      suggestions,
+    };
+  });
+
+  // Format my available items
+  const rawMyAvailableItems =
+    (myAvailableItemsData as unknown as DbMyAvailableItemRow[]) || [];
+  const myAvailableItems: MyAvailableGarment[] = rawMyAvailableItems.map(
+    (item) => ({
+      id: item.id,
+      title: item.title,
+      category: item.category,
+      image_url: item.image_url,
+      status: item.status || "Available",
+    })
+  );
+
   return (
     <CircleDetailClient
       circle={{
@@ -505,6 +670,8 @@ export default async function CircleDetailPage({
       items={items}
       pendingBorrowRequests={pendingBorrowRequests}
       activities={activities}
+      sosRequests={sosRequests}
+      myAvailableItems={myAvailableItems}
     />
   );
 }

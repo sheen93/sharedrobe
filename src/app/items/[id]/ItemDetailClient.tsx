@@ -17,6 +17,8 @@ import {
   Siren,
   Sparkles,
   X,
+  Copy,
+  Camera,
 } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import BorrowRequestModal from "@/components/BorrowRequestModal";
@@ -101,11 +103,32 @@ export default function ItemDetailClient({
 
   // Modals state
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
   const [isNudgeModalOpen, setIsNudgeModalOpen] = useState(false);
   const [isBorrowModalOpen, setIsBorrowModalOpen] = useState(false);
   const [hasRequestedBorrow, setHasRequestedBorrow] = useState(
     Boolean(initialPendingBorrowRequest)
   );
+
+  const handleDuplicateConfirm = (duplicatePhoto: boolean) => {
+    setIsDuplicateModalOpen(false);
+    try {
+      const duplicateData = {
+        title: duplicatePhoto ? `${item.title} (Copy)` : item.title,
+        category: item.category,
+        tags: selectedTags.length > 0 ? selectedTags : item.tags,
+        is_sharable: true,
+        imageUrl: duplicatePhoto ? item.imageUrl : null,
+      };
+      localStorage.setItem(
+        "sharedrobe_duplicate_item",
+        JSON.stringify(duplicateData)
+      );
+    } catch (err) {
+      console.warn("Could not save duplicate item to localStorage:", err);
+    }
+    router.push("/?action=add_item");
+  };
 
   // Feedback banner state
   const [feedback, setFeedback] = useState<{
@@ -613,9 +636,19 @@ export default function ItemDetailClient({
             )}
           </section>
 
-          {/* SECTION 3: PROMINENT DELETE SECTION (Owner) OR BORROW REQUEST BUTTON (Non-Owner) */}
+          {/* SECTION 3: PROMINENT OWNER ACTIONS (Duplicate / Delete) OR BORROW REQUEST BUTTON (Non-Owner) */}
           {isOwner ? (
-            <section className="pt-2">
+            <section className="pt-2 flex flex-col gap-2.5">
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => setIsDuplicateModalOpen(true)}
+                className="w-full flex items-center justify-center gap-1.5 rounded-2xl border border-dusty-lilac/40 bg-dusty-lilac/10 p-3 text-xs font-bold text-french-navy shadow-2xs transition hover:bg-dusty-lilac/20 hover:border-dusty-lilac active:scale-95"
+              >
+                <Copy size={14} className="text-dusty-lilac" />
+                <span>Duplicate Item</span>
+              </button>
+
               <button
                 type="button"
                 disabled={isPending}
@@ -873,6 +906,65 @@ export default function ItemDetailClient({
                     <span>Delete</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Duplicate Item Confirmation Modal */}
+      {isDuplicateModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-midnight-slate/40 backdrop-blur-xs"
+        >
+          <div className="relative flex w-full max-w-[380px] flex-col rounded-[28px] border border-border-neutral bg-buttercream p-5 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-border-neutral">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-dusty-lilac/15 text-dusty-lilac">
+                  <Copy size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-french-navy">
+                    Duplicate Garment
+                  </h3>
+                  <p className="font-mono text-[10px] text-muted">
+                    CLOSET // CLONE
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDuplicateModalOpen(false)}
+                className="rounded-lg p-1 text-muted hover:bg-chalk hover:text-midnight-slate"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="py-4">
+              <p className="text-xs text-graphite leading-relaxed">
+                Do you want to upload a duplicate photo?
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => handleDuplicateConfirm(true)}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-french-navy py-2.5 text-xs font-bold text-white shadow-xs hover:bg-french-navy-hover active:scale-95 transition"
+              >
+                <Check size={14} />
+                <span>Yes, Keep Existing Photo</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDuplicateConfirm(false)}
+                className="w-full flex items-center justify-center gap-2 rounded-xl border border-border-neutral bg-chalk py-2.5 text-xs font-bold text-french-navy hover:bg-border-neutral active:scale-95 transition"
+              >
+                <Camera size={14} className="text-dusty-lilac" />
+                <span>No, Upload New Photo</span>
               </button>
             </div>
           </div>

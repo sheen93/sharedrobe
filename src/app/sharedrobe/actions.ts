@@ -15,6 +15,10 @@ import {
   isValidBorrowDuration,
   isValidNudgeType,
   formatPublicNudgeMessage,
+  isValidSosDescription,
+  isValidSosTargetDate,
+  formatSosRequestActivityMessage,
+  formatSosSuggestionActivityMessage,
   type NudgeReturnType,
 } from "./constants";
 
@@ -2379,4 +2383,533 @@ export async function cancelBorrowRequest(params: {
     data: { itemId: resolvedItemId },
   };
 }
+
+/**
+ * Creates an SOS event request inside a circle.
+ * Validates membership, formats activity feed entry, and revalidates paths.
+ */
+export async function createSosRequest(
+  circleId: string,
+  eventDescription: string,
+  targetDate: string
+): Promise<ActionResult<{ sosId: string }>> {
+  if (!isValidUuid(circleId)) {
+    return { success: false, error: "Invalid circle ID specified." };
+  }
+
+  const trimmedDesc =
+    typeof eventDescription === "string" ? eventDescription.trim() : "";
+  if (!isValidSosDescription(trimmedDesc)) {
+    return {
+      success: false,
+      error:
+        "Please provide a valid event description (between 3 and 500 characters).",
+      fieldErrors: {
+        eventDescription: "Description must be between 3 and 500 characters.",
+      },
+    };
+  }
+
+  const trimmedDate = typeof targetDate === "string" ? targetDate.trim() : "";
+  if (!isValidSosTargetDate(trimmedDate)) {
+    return {
+      success: false,
+      error: "Please select a valid event date (YYYY-MM-DD).",
+      fieldErrors: {
+        targetDate: "Select a valid event date.",
+      },
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      success: false,
+      error: "Your session has expired. Please sign in to post an SOS request.",
+    };
+  }
+
+  // Verify approved circle membership
+  const { data: membership, error: memErr } = await supabase
+    .from("circle_members")
+    .select("id, status")
+    .eq("circle_id", circleId)
+    .eq("user_id", user.id)
+    .eq("status", "approved")
+    .maybeSingle();
+
+  if (memErr || !membership) {
+    return {
+      success: false,
+      error:
+        "You must be an approved member of this circle to post an SOS request.",
+    };
+  }
+
+  // Insert SOS request
+  const { data: sos, error: insertErr } = await supabase
+    .from("sos_requests")
+    .insert({
+      requester_id: user.id,
+      circle_id: circleId,
+      event_description: trimmedDesc,
+      target_date: trimmedDate,
+      status: "active",
+    })
+    .select("id")
+    .single();
+
+  if (insertErr || !sos) {
+    console.error("[createSosRequest] Insert error:", insertErr);
+    return {
+      success: false,
+      error: insertErr?.message || "Failed to create SOS request.",
+    };
+  }
+
+  // Circle activity feed entry (non-fatal)
+  try {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const requesterName =
+      profile?.full_name ||
+      user.user_metadata?.full_name ||
+      user.user_metadata?.name ||
+      "A circle bestie";
+
+    await supabase.from("circle_activity").insert({
+      circle_id: circleId,
+      actor_id: user.id,
+      action_type: "sos_request",
+      target_sos_id: sos.id,
+      message: formatSosRequestActivityMessage(requesterName, trimmedDesc),
+    });
+  } catch (feedErr) {
+    console.warn("[createSosRequest] Feed activity error (non-fatal):", feedErr);
+  }
+
+  revalidatePath("/sharedrobe");
+  revalidatePath(`/sharedrobe/${circleId}`);
+
+  return {
+    success: true,
+    message:
+      "SOS signal sent! Your circle has been alerted to save your outfit crisis.",
+    data: { sosId: sos.id },
+  };
+}
+
+/**
+ * Suggests an available wardrobe piece owned by the user for an active SOS request.
+ */
+export async function suggestItemForSos(
+  sosId: string,
+  itemId: string
+): Promise<ActionResult<{ suggestionId: string }>> {
+  if (!isValidUuid(sosId)) {
+    return { success: false, error: "Invalid SOS request ID." };
+  }
+  if (!isValidUuid(itemId)) {
+    return { success: false, error: "Invalid item ID." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      success: false,
+      error: "Your session has expired. Please sign in to suggest an item.",
+    };
+  }
+
+  // 1. Fetch SOS request
+  const { data: sos, error: sosErr } = await supabase
+    .from("sos_requests")
+    .select("id, circle_id, requester_id, status")
+    .eq("id", sosId)
+    .maybeSingle();
+
+  if (sosErr || !sos) {
+    return { success: false, error: "SOS request not found." };
+  }
+
+  if (sos.status !== "active") {
+    return {
+      success: false,
+      error: "This SOS request is no longer active.",
+    };
+  }
+
+  // 2. Verify suggester is an approved circle member
+  const { data: membership, error: memErr } = await supabase
+    .from("circle_members")
+    .select("id, status")
+    .eq("circle_id", sos.circle_id)
+    .eq("user_id", user.id)
+    .eq("status", "approved")
+    .maybeSingle();
+
+  if (memErr || !membership) {
+    return {
+      success: false,
+      error: "You must be an approved circle member to suggest items.",
+    };
+  }
+
+  // 3. Verify garment is owned by user and is Available
+  const { data: item, error: itemErr } = await supabase
+    .from("items")
+    .select("id, title, owner_id, status")
+    .eq("id", itemId)
+    .maybeSingle();
+
+  if (itemErr || !item) {
+    return { success: false, error: "Garment not found." };
+  }
+
+  if (item.owner_id !== user.id) {
+    return {
+      success: false,
+      error: "You can only suggest pieces from your own closet!",
+    };
+  }
+
+  if (item.status !== "Available") {
+    return {
+      success: false,
+      error: `"${item.title}" is currently marked as ${item.status} and cannot be suggested.`,
+    };
+  }
+
+  // 4. Check if already suggested
+  const { data: existingSuggestion } = await supabase
+    .from("sos_suggestions")
+    .select("id")
+    .eq("sos_id", sosId)
+    .eq("item_id", itemId)
+    .maybeSingle();
+
+  if (existingSuggestion) {
+    return {
+      success: false,
+      error: `You've already suggested "${item.title}" for this SOS request!`,
+    };
+  }
+
+  // 5. Insert suggestion
+  const { data: suggestion, error: insertErr } = await supabase
+    .from("sos_suggestions")
+    .insert({
+      sos_id: sosId,
+      suggester_id: user.id,
+      item_id: itemId,
+      status: "suggested",
+    })
+    .select("id")
+    .single();
+
+  if (insertErr || !suggestion) {
+    console.error("[suggestItemForSos] Insert error:", insertErr);
+    return {
+      success: false,
+      error: insertErr?.message || "Failed to submit item suggestion.",
+    };
+  }
+
+  // Circle activity feed entry (non-fatal)
+  try {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const suggesterName =
+      profile?.full_name ||
+      user.user_metadata?.full_name ||
+      user.user_metadata?.name ||
+      "A circle bestie";
+
+    await supabase.from("circle_activity").insert({
+      circle_id: sos.circle_id,
+      actor_id: user.id,
+      action_type: "sos_suggestion",
+      target_sos_id: sosId,
+      target_item_id: itemId,
+      message: formatSosSuggestionActivityMessage(suggesterName, item.title),
+    });
+  } catch (feedErr) {
+    console.warn(
+      "[suggestItemForSos] Feed activity error (non-fatal):",
+      feedErr
+    );
+  }
+
+  revalidatePath(`/sharedrobe/${sos.circle_id}`);
+
+  return {
+    success: true,
+    message: `Suggested "${item.title}"! Hopefully it saves the day.`,
+    data: { suggestionId: suggestion.id },
+  };
+}
+
+/**
+ * Accepts an SOS suggestion:
+ * - Verifies caller is the SOS requester
+ * - Updates suggestion status to 'accepted'
+ * - Updates parent SOS request status to 'fulfilled'
+ * - Automatically generates a standard borrow_request for the suggested piece
+ * - Dispatches borrow request notification email to the piece's owner
+ */
+export async function acceptSosSuggestion(
+  suggestionId: string,
+  durationIntent: string = "Just for the weekend"
+): Promise<ActionResult<{ borrowRequestId: string; suggestionId: string }>> {
+  if (!isValidUuid(suggestionId)) {
+    return { success: false, error: "Invalid suggestion ID specified." };
+  }
+
+  const trimmedDuration =
+    typeof durationIntent === "string" && durationIntent.trim().length > 0
+      ? durationIntent.trim()
+      : "Just for the weekend";
+
+  const resolvedDuration = isValidBorrowDuration(trimmedDuration)
+    ? trimmedDuration
+    : "Just for the weekend";
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      success: false,
+      error: "Your session has expired. Please sign in to accept suggestions.",
+    };
+  }
+
+  // 1. Fetch suggestion along with parent SOS and item details
+  const { data: suggestion, error: sugErr } = await supabase
+    .from("sos_suggestions")
+    .select(`
+      id,
+      sos_id,
+      suggester_id,
+      item_id,
+      status,
+      sos:sos_requests!inner (
+        id,
+        requester_id,
+        circle_id,
+        event_description,
+        status
+      ),
+      item:items!inner (
+        id,
+        title,
+        owner_id,
+        status
+      )
+    `)
+    .eq("id", suggestionId)
+    .maybeSingle();
+
+  if (sugErr || !suggestion) {
+    console.error("[acceptSosSuggestion] Fetch error:", sugErr);
+    return { success: false, error: "Suggestion not found." };
+  }
+
+  type SosJoinRow = {
+    id: string;
+    requester_id: string;
+    circle_id: string;
+    event_description: string;
+    status: string;
+  };
+  type ItemJoinRow = {
+    id: string;
+    title: string;
+    owner_id: string;
+    status: string;
+  };
+
+  const sos = (Array.isArray(suggestion.sos)
+    ? suggestion.sos[0]
+    : suggestion.sos) as unknown as SosJoinRow | null;
+  const item = (Array.isArray(suggestion.item)
+    ? suggestion.item[0]
+    : suggestion.item) as unknown as ItemJoinRow | null;
+
+  if (!sos || !item) {
+    return {
+      success: false,
+      error: "Could not load the SOS event or garment record.",
+    };
+  }
+
+  // 2. Caller must be the SOS requester
+  if (sos.requester_id !== user.id) {
+    return {
+      success: false,
+      error: "Only the author of the SOS request can accept suggestions.",
+    };
+  }
+
+  if (suggestion.status === "accepted") {
+    return {
+      success: false,
+      error: "This suggestion has already been accepted!",
+    };
+  }
+
+  if (item.status !== "Available") {
+    return {
+      success: false,
+      error: `"${item.title}" is currently ${item.status} and cannot be borrowed.`,
+    };
+  }
+
+  // 3. Mark suggestion accepted
+  const { error: sugUpdateErr } = await supabase
+    .from("sos_suggestions")
+    .update({
+      status: "accepted",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", suggestionId);
+
+  if (sugUpdateErr) {
+    console.error(
+      "[acceptSosSuggestion] Update suggestion error:",
+      sugUpdateErr
+    );
+    return {
+      success: false,
+      error: "Failed to update suggestion status.",
+    };
+  }
+
+  // 4. Mark parent SOS request fulfilled
+  await supabase
+    .from("sos_requests")
+    .update({
+      status: "fulfilled",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", sos.id);
+
+  // 5. Automatically generate standard borrow_request
+  let borrowRequestId: string;
+  const { data: existingBorrow } = await supabase
+    .from("borrow_requests")
+    .select("id, status")
+    .eq("item_id", item.id)
+    .eq("requester_id", user.id)
+    .eq("circle_id", sos.circle_id)
+    .eq("status", "pending")
+    .maybeSingle();
+
+  if (existingBorrow) {
+    borrowRequestId = existingBorrow.id;
+  } else {
+    const { data: newBorrow, error: borrowErr } = await supabase
+      .from("borrow_requests")
+      .insert({
+        item_id: item.id,
+        requester_id: user.id,
+        circle_id: sos.circle_id,
+        status: "pending",
+        duration_intent: resolvedDuration,
+      })
+      .select("id")
+      .single();
+
+    if (borrowErr || !newBorrow) {
+      console.error(
+        "[acceptSosSuggestion] Create borrow request error:",
+        borrowErr
+      );
+      return {
+        success: false,
+        error: "Accepted suggestion, but failed to generate the borrow request.",
+      };
+    }
+    borrowRequestId = newBorrow.id;
+  }
+
+  // 6. Non-fatal Resend notification email to the garment owner
+  let notificationSent = false;
+  try {
+    const [{ data: ownerProfile }, { data: circleData }, { data: requesterProfile }] =
+      await Promise.all([
+        supabase
+          .from("profiles")
+          .select("full_name, email")
+          .eq("id", item.owner_id)
+          .maybeSingle(),
+        supabase
+          .from("circles")
+          .select("name")
+          .eq("id", sos.circle_id)
+          .maybeSingle(),
+        supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", user.id)
+          .maybeSingle(),
+      ]);
+
+    if (ownerProfile?.email) {
+      const origin = await getRequestOrigin();
+      const requesterName =
+        requesterProfile?.full_name ||
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        "A circle bestie";
+
+      const emailRes = await sendBorrowRequestEmail({
+        ownerEmail: ownerProfile.email,
+        ownerName: ownerProfile.full_name || "Closet Icon",
+        requesterName,
+        itemTitle: item.title,
+        circleName: circleData?.name || "Your Circle",
+        durationIntent: resolvedDuration,
+        appUrl: origin,
+      });
+
+      notificationSent = emailRes.success;
+    }
+  } catch (emailErr) {
+    console.warn("[acceptSosSuggestion] Email notification warning:", emailErr);
+  }
+
+  revalidatePath("/sharedrobe");
+  revalidatePath(`/sharedrobe/${sos.circle_id}`);
+  revalidatePath(`/items/${item.id}`);
+
+  return {
+    success: true,
+    message: `Suggestion accepted! A borrow request for "${item.title}" has been sent to its owner.`,
+    notificationSent,
+    data: {
+      borrowRequestId,
+      suggestionId,
+    },
+  };
+}
+
 
